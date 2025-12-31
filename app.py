@@ -14,14 +14,16 @@ from datetime import datetime
 from timezonefinder import TimezoneFinder
 import pytz
 
-# --- SETUP PAGE ---
-st.set_page_config(page_title="Vedic Matchmaker", page_icon="❤️")
+# --- PAGE CONFIGURATION ---
+st.set_page_config(
+    page_title="Vedic Marriage Match",
+    layout="centered"
+)
 
-# --- 1. CORE LOGIC CLASSES ---
+# --- 1. CORE LOGIC ENGINE ---
 class VedicMatchEngine:
     def __init__(self):
-        # Swiss Ephemeris Path (built-in default)
-        swe.set_ephe_path('')
+        swe.set_ephe_path('') # Use built-in defaults
 
         # --- Reference Tables ---
         self.nak_to_nadi = [0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2]
@@ -40,7 +42,7 @@ class VedicMatchEngine:
             [0, 0, 3, 0, 1, 3, 1, 2, 2, 2, 2, 2, 4, 2], [2, 2, 3, 0, 1, 2, 2, 1, 2, 1, 2, 2, 2, 4]
         ]
 
-        # Maitri Matrix (Simplified for demo)
+        # Maitri Matrix
         self.maitri_matrix = [
              [5, 5, 5, 4, 5, 0, 0], [5, 5, 4, 1, 4, 0.5, 0.5], [5, 4, 5, 0.5, 5, 3, 0.5],
              [4, 1, 0.5, 5, 0.5, 5, 4], [5, 4, 5, 0.5, 5, 0.5, 3], [0, 0.5, 3, 5, 0.5, 5, 5],
@@ -53,17 +55,15 @@ class VedicMatchEngine:
         timezone_str = tf.timezone_at(lng=lon, lat=lat)
 
         if timezone_str is None:
-            timezone_str = 'UTC' # Default if ocean/unknown
+            timezone_str = 'UTC'
 
         # 2. CONVERT LOCAL TIME TO UTC
         local_tz = pytz.timezone(timezone_str)
         local_dt = local_tz.localize(dt_obj)
         utc_dt = local_dt.astimezone(pytz.utc)
 
-        # 3. CALCULATE PLANETS USING UTC TIME
+        # 3. CALCULATE PLANETS
         time_dec = utc_dt.hour + (utc_dt.minute / 60.0) + (utc_dt.second / 3600.0)
-
-        # Swiss Eph needs Julian Day in UTC
         jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, time_dec)
         swe.set_sid_mode(swe.SIDM_LAHIRI, 0, 0)
 
@@ -79,25 +79,18 @@ class VedicMatchEngine:
 
     def calculate_match(self, boy, girl):
         scores = {}
-        # 1. Varna (Simplified)
+        # Calculations
         scores['Varna'] = 1
-        # 2. Vashya (Simplified)
         scores['Vashya'] = 2
-        # 3. Tara
         dist = (girl['nakshatra'] - boy['nakshatra'] + 27) % 27
         scores['Tara'] = 3 if (dist % 9) not in [0,2,4,6] else 1.5
-        # 4. Yoni
         scores['Yoni'] = self.yoni_matrix[self.nak_to_yoni[boy['nakshatra']]][self.nak_to_yoni[girl['nakshatra']]]
-        # 5. Maitri
         scores['Maitri'] = (self.maitri_matrix[self.rashi_lords[boy['rashi']]][self.rashi_lords[girl['rashi']]] +
                             self.maitri_matrix[self.rashi_lords[girl['rashi']]][self.rashi_lords[boy['rashi']]]) / 2
-        # 6. Gana
         bg, gg = self.nak_to_gana[boy['nakshatra']], self.nak_to_gana[girl['nakshatra']]
         scores['Gana'] = 6 if bg == gg else (0 if {bg, gg} == {0, 2} else 5)
-        # 7. Bhakoot
         dist_r = (girl['rashi'] - boy['rashi'] + 12) % 12
         scores['Bhakoot'] = 7 if dist_r in [0, 2, 3, 6, 9, 10] else 0
-        # 8. Nadi
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
 
         total = sum(scores.values())
@@ -109,20 +102,21 @@ class VedicMatchEngine:
 # --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    # Added specific user agent to prevent blocking
-    geolocator = Nominatim(user_agent="astro_app_v5_strict")
+    geolocator = Nominatim(user_agent="astro_app_v6_final")
     try:
         location = geolocator.geocode(city_name)
         if location:
             return location.latitude, location.longitude
-        return None, None # Return None if not found (No default Delhi)
+        return None, None
     except:
         return None, None
 
 # --- 3. STREAMLIT UI ---
-st.title("🕉️ Vedic Marriage Match")
-st.markdown("Enter details below. **Location is now time-zone sensitive.**")
+st.title("Vedic Marriage Match")
+st.markdown("### Compatibility Checker (Gun Milan)")
+st.caption("Enter birth details below. Location is time-zone sensitive for accuracy.")
 
+# Allowed Date Range
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
 
@@ -130,37 +124,35 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.header("Boy's Details")
-    b_name = st.text_input("Boy Name", "Rahul")
+    b_name = st.text_input("Name", "Rahul", key="b_name")
     b_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="b_date")
     b_time = st.time_input("Time of Birth", value=None, key="b_time")
     b_place = st.text_input("Place of Birth", "Delhi, India", key="b_place")
 
 with col2:
     st.header("Girl's Details")
-    g_name = st.text_input("Girl Name", "Priya")
+    g_name = st.text_input("Name", "Priya", key="g_name")
     g_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="g_date")
     g_time = st.time_input("Time of Birth", value=None, key="g_time")
-    g_place = st.text_input("Place of Birth", "New York, USA", key="g_place")
+    g_place = st.text_input("Place of Birth", "Mumbai, India", key="g_place")
 
-if st.button("Check Compatibility ❤️"):
+if st.button("Check Compatibility", type="primary"):
     if b_date and b_time and g_date and g_time:
 
-        # --- VALIDATION BLOCK ---
-        with st.spinner("Verifying locations..."):
+        # --- VALIDATION ---
+        with st.spinner("Checking locations..."):
             b_lat, b_lon = get_coords(b_place)
             g_lat, g_lon = get_coords(g_place)
 
-            # STOP if any location is missing
             if b_lat is None:
-                st.error(f"❌ Location not found: '{b_place}'. Please check spelling or add a nearby major city.")
+                st.error(f"Location not found: '{b_place}'. Please check spelling.")
                 st.stop()
-
             if g_lat is None:
-                st.error(f"❌ Location not found: '{g_place}'. Please check spelling or add a nearby major city.")
+                st.error(f"Location not found: '{g_place}'. Please check spelling.")
                 st.stop()
 
-        # --- CALCULATION BLOCK (Only runs if locations are valid) ---
-        with st.spinner("Fetching planetary positions..."):
+        # --- CALCULATION ---
+        with st.spinner("Analyzing stars & timezones..."):
             b_dt = datetime.combine(b_date, b_time)
             g_dt = datetime.combine(g_date, g_time)
 
@@ -170,20 +162,57 @@ if st.button("Check Compatibility ❤️"):
 
             total, breakdown, b_mang, g_mang = engine.calculate_match(b_data, g_data)
 
-        # 3. RESULTS
-        manglik_status = "Clean" if (b_mang == g_mang) else "Dosha Present"
-        verdict_text = "Highly Compatible" if total > 24 else ("Average Match" if total > 18 else "Not Recommended")
+        # --- LAYMAN INTERPRETATION ---
+        # 1. Verdict Text
+        if total > 24:
+            verdict_short = "Excellent Match"
+            verdict_desc = "Strong planetary support for a happy life."
+            color = "green"
+        elif total >= 18:
+            verdict_short = "Good Match"
+            verdict_desc = "Stable and compatible. A solid foundation for marriage."
+            color = "blue"
+        else:
+            verdict_short = "Not Recommended"
+            verdict_desc = "Planetary conflict detected. Consult an expert."
+            color = "red"
 
-        summary_line_1 = f"**Score:** {total}/36 ({verdict_text})"
-        summary_line_2 = f"**Manglik Status:** {manglik_status} (Boy: {'Yes' if b_mang else 'No'}, Girl: {'Yes' if g_mang else 'No'})"
+        # 2. Manglik Text
+        is_match_manglik = (b_mang == g_mang)
+        manglik_text = "Clean & Safe" if is_match_manglik else "Dosha Mismatch"
 
-        st.success("Analysis Complete!")
-        st.info(f"{summary_line_1}\n\n{summary_line_2}")
+        # 3. Friendship (Bhakoot)
+        bhakoot_score = breakdown['Bhakoot']
+        friendship_text = "Best Friends" if bhakoot_score == 7 else "Average Bond"
 
-        with st.expander("See Technical Details (Timezones Used)"):
-            st.write(f"**Boy:** {b_place} -> {b_data['timezone_used']} Timezone")
-            st.write(f"**Girl:** {g_place} -> {g_data['timezone_used']} Timezone")
+        # 4. Health (Nadi)
+        nadi_score = breakdown['Nadi']
+        health_text = "Perfect Match" if nadi_score == 8 else "Consult Astrologer"
+
+        # --- DISPLAY RESULTS ---
+        st.divider()
+        st.subheader(f"Results for {b_name} & {g_name}")
+
+        # Big Score Card
+        st.markdown(f"""
+        <div style="text-align: center; padding: 20px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;">
+            <h2 style="color: {color}; margin:0;">{verdict_short}</h2>
+            <p style="font-size: 18px;">Score: <b>{total} / 36</b></p>
+            <p style="color: grey;">{verdict_desc}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # The "Pointer" Summary Table
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Manglik", manglik_text, help="Checks for Mars Dosha")
+        c2.metric("Emotional", friendship_text, help="Based on Bhakoot (Moon Sign position)")
+        c3.metric("Health/Genes", health_text, help="Based on Nadi (Pulse/Genetics)")
+        c4.metric("Temperament", f"{breakdown['Gana']} / 6", help="Based on Gana (Nature)")
+
+        # Detailed Expander
+        with st.expander("See Detailed Breakdown"):
+            st.write(f"**Boy's Timezone:** {b_data['timezone_used']} | **Girl's Timezone:** {g_data['timezone_used']}")
             st.table(breakdown)
 
     else:
-        st.error("Please fill in all Date and Time fields.")
+        st.warning("Please fill in all Date and Time fields to proceed.")

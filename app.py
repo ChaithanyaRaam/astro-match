@@ -11,6 +11,8 @@ import streamlit as st
 import swisseph as swe
 from geopy.geocoders import Nominatim
 from datetime import datetime
+from timezonefinder import TimezoneFinder
+import pytz
 
 # --- SETUP PAGE ---
 st.set_page_config(page_title="Vedic Matchmaker", page_icon="❤️")
@@ -45,9 +47,24 @@ class VedicMatchEngine:
              [0, 0.5, 0.5, 4, 3, 5, 5]
         ]
 
-    def get_planet_data(self, dt, lat, lon):
-        time_dec = dt.hour + (dt.minute / 60.0)
-        jd = swe.julday(dt.year, dt.month, dt.day, time_dec)
+    def get_planet_data(self, dt_obj, lat, lon):
+        # 1. FIND TIMEZONE FROM LAT/LON
+        tf = TimezoneFinder()
+        timezone_str = tf.timezone_at(lng=lon, lat=lat)
+
+        if timezone_str is None:
+            timezone_str = 'UTC' # Default if ocean/unknown
+
+        # 2. CONVERT LOCAL TIME TO UTC
+        local_tz = pytz.timezone(timezone_str)
+        local_dt = local_tz.localize(dt_obj)
+        utc_dt = local_dt.astimezone(pytz.utc)
+
+        # 3. CALCULATE PLANETS USING UTC TIME
+        time_dec = utc_dt.hour + (utc_dt.minute / 60.0) + (utc_dt.second / 3600.0)
+
+        # Swiss Eph needs Julian Day in UTC
+        jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, time_dec)
         swe.set_sid_mode(swe.SIDM_LAHIRI, 0, 0)
 
         moon_deg = swe.calc_ut(jd, 1, swe.FLG_SIDEREAL)[0][0]
@@ -56,7 +73,8 @@ class VedicMatchEngine:
         return {
             "nakshatra": int(moon_deg / 13.333333),
             "rashi": int(moon_deg / 30),
-            "mars_house": (int(mars_deg/30) - int(moon_deg/30) + 12) % 12 + 1
+            "mars_house": (int(mars_deg/30) - int(moon_deg/30) + 12) % 12 + 1,
+            "timezone_used": timezone_str
         }
 
     def calculate_match(self, boy, girl):
@@ -91,19 +109,20 @@ class VedicMatchEngine:
 # --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    geolocator = Nominatim(user_agent="astro_app_v3")
+    # Added specific user agent to prevent blocking
+    geolocator = Nominatim(user_agent="astro_app_v5_strict")
     try:
         location = geolocator.geocode(city_name)
-        if location: return location.latitude, location.longitude
-        return 28.7, 77.1 # Default Delhi
+        if location:
+            return location.latitude, location.longitude
+        return None, None # Return None if not found (No default Delhi)
     except:
-        return 28.7, 77.1
+        return None, None
 
 # --- 3. STREAMLIT UI ---
 st.title("🕉️ Vedic Marriage Match")
-st.markdown("Enter details below to check Gun Milan & Manglik Dosha.")
+st.markdown("Enter details below. **Location is now time-zone sensitive.**")
 
-# Define Date Range (1900 to 2100) to support older birthdates
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
 
@@ -114,25 +133,36 @@ with col1:
     b_name = st.text_input("Boy Name", "Rahul")
     b_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="b_date")
     b_time = st.time_input("Time of Birth", value=None, key="b_time")
-    b_place = st.text_input("Place of Birth", "Delhi", key="b_place")
+    b_place = st.text_input("Place of Birth", "Delhi, India", key="b_place")
 
 with col2:
     st.header("Girl's Details")
     g_name = st.text_input("Girl Name", "Priya")
     g_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="g_date")
     g_time = st.time_input("Time of Birth", value=None, key="g_time")
-    g_place = st.text_input("Place of Birth", "Mumbai", key="g_place")
+    g_place = st.text_input("Place of Birth", "New York, USA", key="g_place")
 
 if st.button("Check Compatibility ❤️"):
     if b_date and b_time and g_date and g_time:
-        # 1. Process Dates
-        b_dt = datetime.combine(b_date, b_time)
-        g_dt = datetime.combine(g_date, g_time)
 
-        # 2. Get Coordinates
-        with st.spinner("Fetching planetary positions..."):
+        # --- VALIDATION BLOCK ---
+        with st.spinner("Verifying locations..."):
             b_lat, b_lon = get_coords(b_place)
             g_lat, g_lon = get_coords(g_place)
+
+            # STOP if any location is missing
+            if b_lat is None:
+                st.error(f"❌ Location not found: '{b_place}'. Please check spelling or add a nearby major city.")
+                st.stop()
+
+            if g_lat is None:
+                st.error(f"❌ Location not found: '{g_place}'. Please check spelling or add a nearby major city.")
+                st.stop()
+
+        # --- CALCULATION BLOCK (Only runs if locations are valid) ---
+        with st.spinner("Fetching planetary positions..."):
+            b_dt = datetime.combine(b_date, b_time)
+            g_dt = datetime.combine(g_date, g_time)
 
             engine = VedicMatchEngine()
             b_data = engine.get_planet_data(b_dt, b_lat, b_lon)
@@ -140,22 +170,19 @@ if st.button("Check Compatibility ❤️"):
 
             total, breakdown, b_mang, g_mang = engine.calculate_match(b_data, g_data)
 
-        # 3. GENERATE 2-LINE SUMMARY
+        # 3. RESULTS
         manglik_status = "Clean" if (b_mang == g_mang) else "Dosha Present"
         verdict_text = "Highly Compatible" if total > 24 else ("Average Match" if total > 18 else "Not Recommended")
 
         summary_line_1 = f"**Score:** {total}/36 ({verdict_text})"
         summary_line_2 = f"**Manglik Status:** {manglik_status} (Boy: {'Yes' if b_mang else 'No'}, Girl: {'Yes' if g_mang else 'No'})"
 
-        # 4. Display Results
         st.success("Analysis Complete!")
-
-        # --- THE 2-LINE RESULT ---
         st.info(f"{summary_line_1}\n\n{summary_line_2}")
-        # -------------------------
 
-        with st.expander("See Detailed Breakdown"):
-            st.write(f"**Boy's Star:** Index {b_data['nakshatra']} | **Girl's Star:** Index {g_data['nakshatra']}")
+        with st.expander("See Technical Details (Timezones Used)"):
+            st.write(f"**Boy:** {b_place} -> {b_data['timezone_used']} Timezone")
+            st.write(f"**Girl:** {g_place} -> {g_data['timezone_used']} Timezone")
             st.table(breakdown)
 
     else:

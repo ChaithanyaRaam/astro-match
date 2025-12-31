@@ -102,7 +102,8 @@ class VedicMatchEngine:
 # --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    geolocator = Nominatim(user_agent="astro_app_v6_final")
+    # Added timeout=10 to allow slower connections to finish
+    geolocator = Nominatim(user_agent="vedic_astro_match_v8", timeout=10)
     try:
         location = geolocator.geocode(city_name)
         if location:
@@ -113,7 +114,7 @@ def get_coords(city_name):
 
 # --- 3. STREAMLIT UI ---
 st.title("Vedic Marriage Match")
-st.markdown("### Compatibility Checker (Gun Milan)")
+st.markdown("### Compatibility Checker - Powered by YUGMA's Intelligence")
 st.caption("Enter birth details below. Location is time-zone sensitive for accuracy.")
 
 # Allowed Date Range
@@ -145,7 +146,7 @@ if st.button("Check Compatibility", type="primary"):
             g_lat, g_lon = get_coords(g_place)
 
             if b_lat is None:
-                st.error(f"Location not found: '{b_place}'. Please check spelling.")
+                st.error(f"Location not found: '{b_place}'. Please check spelling or try 'Adoor, India'.")
                 st.stop()
             if g_lat is None:
                 st.error(f"Location not found: '{g_place}'. Please check spelling.")

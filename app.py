@@ -11,7 +11,6 @@ import streamlit as st
 import swisseph as swe
 from geopy.geocoders import Nominatim
 from datetime import datetime
-import time
 
 # --- SETUP PAGE ---
 st.set_page_config(page_title="Vedic Matchmaker", page_icon="❤️")
@@ -92,7 +91,7 @@ class VedicMatchEngine:
 # --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    geolocator = Nominatim(user_agent="astro_app_v2")
+    geolocator = Nominatim(user_agent="astro_app_v3")
     try:
         location = geolocator.geocode(city_name)
         if location: return location.latitude, location.longitude
@@ -104,19 +103,23 @@ def get_coords(city_name):
 st.title("🕉️ Vedic Marriage Match")
 st.markdown("Enter details below to check Gun Milan & Manglik Dosha.")
 
+# Define Date Range (1900 to 2100) to support older birthdates
+min_date = datetime(1900, 1, 1)
+max_date = datetime(2100, 12, 31)
+
 col1, col2 = st.columns(2)
 
 with col1:
     st.header("Boy's Details")
     b_name = st.text_input("Boy Name", "Rahul")
-    b_date = st.date_input("Date of Birth", value=None, key="b_date")
+    b_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="b_date")
     b_time = st.time_input("Time of Birth", value=None, key="b_time")
     b_place = st.text_input("Place of Birth", "Delhi", key="b_place")
 
 with col2:
     st.header("Girl's Details")
     g_name = st.text_input("Girl Name", "Priya")
-    g_date = st.date_input("Date of Birth", value=None, key="g_date")
+    g_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="g_date")
     g_time = st.time_input("Time of Birth", value=None, key="g_time")
     g_place = st.text_input("Place of Birth", "Mumbai", key="g_place")
 

@@ -102,8 +102,7 @@ class VedicMatchEngine:
 # --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    # Added timeout=10 to allow slower connections to finish
-    geolocator = Nominatim(user_agent="vedic_astro_match_v8", timeout=10)
+    geolocator = Nominatim(user_agent="astro_app_final_v9", timeout=10)
     try:
         location = geolocator.geocode(city_name)
         if location:
@@ -114,7 +113,7 @@ def get_coords(city_name):
 
 # --- 3. STREAMLIT UI ---
 st.title("Vedic Marriage Match")
-st.markdown("### Compatibility Checker - Powered by YUGMA's Intelligence")
+st.markdown("### Compatibility Checker - powered by Yugma's Intelligence")
 st.caption("Enter birth details below. Location is time-zone sensitive for accuracy.")
 
 # Allowed Date Range
@@ -203,12 +202,14 @@ if st.button("Check Compatibility", type="primary"):
         </div>
         """, unsafe_allow_html=True)
 
-        # The "Pointer" Summary Table
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Manglik", manglik_text, help="Checks for Mars Dosha")
-        c2.metric("Emotional", friendship_text, help="Based on Bhakoot (Moon Sign position)")
-        c3.metric("Health/Genes", health_text, help="Based on Nadi (Pulse/Genetics)")
-        c4.metric("Temperament", f"{breakdown['Gana']} / 6", help="Based on Gana (Nature)")
+        # UPDATED LAYOUT: 2 Rows x 2 Columns (Fixes readability)
+        row1_c1, row1_c2 = st.columns(2)
+        row1_c1.metric("Manglik Status", manglik_text, help="Checks for Mars Dosha")
+        row1_c2.metric("Emotional Bond", friendship_text, help="Based on Bhakoot")
+
+        row2_c1, row2_c2 = st.columns(2)
+        row2_c1.metric("Health/Genes", health_text, help="Based on Nadi")
+        row2_c2.metric("Temperament", f"{breakdown['Gana']} / 6", help="Based on Gana")
 
         # Detailed Expander
         with st.expander("See Detailed Breakdown"):

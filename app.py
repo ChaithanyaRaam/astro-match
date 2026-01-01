@@ -9,7 +9,7 @@ Original file is located at
 
 import streamlit as st
 import swisseph as swe
-from geopy.geocoders import MapBox  # <--- CHANGED to MapBox
+from geopy.geocoders import MapBox
 from datetime import datetime
 from timezonefinder import TimezoneFinder
 import pytz
@@ -17,16 +17,16 @@ import time
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Astro compatibility - Powered by Yugma's AI Intelligence",
+    page_title="Astro compatibility - Powered by Yugma's Intelligence",
     layout="centered"
 )
 
-# --- 1. CORE LOGIC ENGINE ---
+# --- 1. CORE ENGINE ---
 class VedicMatchEngine:
     def __init__(self):
-        swe.set_ephe_path('') # Use built-in defaults
+        swe.set_ephe_path('')
 
-        # Reference Tables
+        # Tables
         self.nak_to_nadi = [0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2]
         self.nak_to_gana = [0,1,2,1,0,1,0,0,0, 2,1,1,2,2,2,2,0,0, 2,1,1,0,2,2,1,0,0]
         self.rashi_lords = [2, 5, 3, 1, 0, 3, 5, 2, 4, 6, 6, 4]
@@ -95,16 +95,12 @@ class VedicMatchEngine:
         malefics = ["Sun", "Mars", "Saturn", "Rahu", "Ketu"]
         dosha_houses = [1, 2, 4, 7, 8, 12]
         total_points = 0
-        breakdown = {}
         for planet in malefics:
-            p_score = 0
             pos = data['positions'][planet]
-            if pos['Lagna'] in dosha_houses: p_score += 1
-            if pos['Moon'] in dosha_houses: p_score += 1
-            if pos['Venus'] in dosha_houses: p_score += 1
-            total_points += p_score
-            breakdown[planet] = p_score
-        return total_points, breakdown
+            if pos['Lagna'] in dosha_houses: total_points += 1
+            if pos['Moon'] in dosha_houses: total_points += 1
+            if pos['Venus'] in dosha_houses: total_points += 1
+        return total_points
 
     def check_manglik_specifics(self, p_data):
         house = p_data['positions']['Mars']['Lagna']
@@ -113,15 +109,15 @@ class VedicMatchEngine:
 
         is_manglik = house in [1, 2, 4, 7, 8, 12]
         if not is_manglik:
-            return False, "Non-Manglik", "Mars is in a safe house."
+            return False, "Green Flag"
 
-        if sign in [0, 7, 9]: return False, "Cancelled (Own House)", "Mars is powerful in its own/exalted sign."
+        if sign in [0, 7, 9]: return False, "Cancelled (Power Move)"
         jup_deg = p_data['planets_deg']['Jupiter']
-        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return False, "Cancelled (Jupiter)", "Jupiter's influence calms Mars."
+        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return False, "Cancelled (Lucky)"
         sun_deg = p_data['planets_deg']['Sun']
-        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return False, "Cancelled (Combust)", "Mars is close to Sun."
+        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return False, "Cancelled (Chill)"
 
-        return True, "Manglik", f"Mars in House {house} (Dosha active)."
+        return True, "Red Flag"
 
     def calculate_match(self, boy, girl):
         scores = {}
@@ -139,25 +135,24 @@ class VedicMatchEngine:
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
         total = sum(scores.values())
 
-        b_mang_bool, b_mang_label, b_reason = self.check_manglik_specifics(boy)
-        g_mang_bool, g_mang_label, g_reason = self.check_manglik_specifics(girl)
+        b_mang_bool, b_mang_label = self.check_manglik_specifics(boy)
+        g_mang_bool, g_mang_label = self.check_manglik_specifics(girl)
 
-        b_papa_total, b_papa_breakdown = self.calculate_papa_points(boy)
-        g_papa_total, g_papa_breakdown = self.calculate_papa_points(girl)
+        b_papa_total = self.calculate_papa_points(boy)
+        g_papa_total = self.calculate_papa_points(girl)
 
         return {
             "score": total,
-            "breakdown": scores,
-            "boy_manglik": {"is_manglik": b_mang_bool, "label": b_mang_label, "reason": b_reason},
-            "girl_manglik": {"is_manglik": g_mang_bool, "label": g_mang_label, "reason": g_reason},
-            "boy_papa": {"total": b_papa_total, "details": b_papa_breakdown},
-            "girl_papa": {"total": g_papa_total, "details": g_papa_breakdown}
+            "boy_manglik": {"is_manglik": b_mang_bool, "label": b_mang_label},
+            "girl_manglik": {"is_manglik": g_mang_bool, "label": g_mang_label},
+            "boy_papa": b_papa_total,
+            "girl_papa": g_papa_total
         }
 
-# --- 2. MAPBOX LOCATION UTILS (PAID API) ---
+# --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    # 1. LOCAL BACKUP (Instant results for common tests)
+    # Local Backup
     known_cities = {
         "adoor": (9.1529, 76.7356),
         "chennai": (13.0827, 80.2707),
@@ -168,134 +163,106 @@ def get_coords(city_name):
     clean = city_name.lower().split(',')[0].strip()
     if clean in known_cities: return known_cities[clean]
 
-    # 2. MAPBOX API (Using your key)
-    # The key is pasted here. In production, use st.secrets!
+    # Mapbox API
     MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdzNlc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
-
     try:
-        geolocator = MapBox(api_key=MAPBOX_KEY, user_agent="vedic_match_pro_v16")
+        geolocator = MapBox(api_key=MAPBOX_KEY, user_agent="astro_genz_v1")
         location = geolocator.geocode(city_name)
-        if location:
-            return location.latitude, location.longitude
+        if location: return location.latitude, location.longitude
         return None, None
     except:
         return None, None
 
-# --- 3. STREAMLIT UI ---
-st.title("Vedic Marriage Match")
-st.markdown("### Professional Compatibility Report")
-st.caption("Powered by Mapbox API for precise locations.")
+# --- 3. UI: CLEAN GEN Z EDITION ---
+st.title("AstroVibe Check")
+st.markdown("Is it true love or a waste of time? Let's check the stars.")
 
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
 
-col1, col2 = st.columns(2)
-with col1:
-    st.header("Boy's Details")
-    b_name = st.text_input("Name", "Rahul", key="b_name")
-    b_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="b_date")
-    b_time = st.time_input("Time of Birth", value=None, key="b_time")
-    b_place = st.text_input("Place of Birth", "Adoor, India", key="b_place")
+c1, c2 = st.columns(2)
+with c1:
+    st.subheader("Him")
+    b_name = st.text_input("Name", "Rahul", key="b_n")
+    b_date = st.date_input("B-Day", value=None, min_value=min_date, max_value=max_date, key="b_d")
+    b_time = st.time_input("Birth Time", value=None, key="b_t")
+    b_place = st.text_input("City", "Adoor, India", key="b_p")
 
-with col2:
-    st.header("Girl's Details")
-    g_name = st.text_input("Name", "Priya", key="g_name")
-    g_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="g_date")
-    g_time = st.time_input("Time of Birth", value=None, key="g_time")
-    g_place = st.text_input("Place of Birth", "Chennai, India", key="g_place")
+with c2:
+    st.subheader("Her")
+    g_name = st.text_input("Name", "Priya", key="g_n")
+    g_date = st.date_input("B-Day", value=None, min_value=min_date, max_value=max_date, key="g_d")
+    g_time = st.time_input("Birth Time", value=None, key="g_t")
+    g_place = st.text_input("City", "Chennai, India", key="g_p")
 
-if st.button("Check Compatibility", type="primary"):
+if st.button("Do We Vibe?", type="primary"):
     if b_date and b_time and g_date and g_time:
 
-        # --- PROCESS ---
-        with st.spinner("Connecting to Mapbox Satellite..."):
+        with st.spinner("Reading the stars..."):
             b_lat, b_lon = get_coords(b_place)
             g_lat, g_lon = get_coords(g_place)
 
-            if b_lat is None:
-                st.error(f"❌ Location not found: '{b_place}'. Please check spelling.")
-                st.stop()
-            if g_lat is None:
-                st.error(f"❌ Location not found: '{g_place}'. Please check spelling.")
+            if b_lat is None or g_lat is None:
+                st.error("Bro, I can't find that city. Check spelling.")
                 st.stop()
 
-        with st.spinner("Analyzing stars & timezones..."):
             b_dt = datetime.combine(b_date, b_time)
             g_dt = datetime.combine(g_date, g_time)
 
             engine = VedicMatchEngine()
             b_data = engine.get_planet_data(b_dt, b_lat, b_lon)
             g_data = engine.get_planet_data(g_dt, g_lat, g_lon)
-
             res = engine.calculate_match(b_data, g_data)
 
-        # --- FINAL DECISION LOGIC ---
+        # --- VERDICT LOGIC ---
         score = res['score']
         b_mang = res['boy_manglik']['is_manglik']
         g_mang = res['girl_manglik']['is_manglik']
-        b_papa = res['boy_papa']['total']
-        g_papa = res['girl_papa']['total']
+        b_papa = res['boy_papa']
+        g_papa = res['girl_papa']
 
-        score_pass = score >= 18
-        manglik_pass = (b_mang == g_mang)
+        # 1. Vibe Check (Score)
+        vibe_check = score >= 18
 
-        papa_pass = True
-        if g_papa > (b_papa + 2):
-            papa_pass = False
+        # 2. Red Flags (Manglik) - Pass if same status
+        red_flag_check = (b_mang == g_mang)
 
-        if score_pass and manglik_pass and papa_pass:
-            final_title = "✅ Marriage Recommended"
-            final_desc = "All major factors (Score, Mangal Dosha, Papa Balance) are favorable."
-            final_color = "green"
-        elif score_pass and (not manglik_pass or not papa_pass):
-            final_title = "⚠️ Consult Astrologer"
-            final_desc = "Score is good, but there is a Dosha Mismatch."
-            final_color = "orange"
-        else:
-            final_title = "❌ Not Recommended"
-            final_desc = "Compatibility score is too low or severe mismatch detected."
-            final_color = "red"
+        # 3. Baggage Check (Papasamya)
+        baggage_check = True
+        if g_papa > (b_papa + 2): baggage_check = False
 
-        # --- DISPLAY ---
+        # --- FINAL RESULTS ---
         st.divider()
-        st.markdown(f"""
-        <div style="text-align: center; padding: 20px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;">
-            <h1 style="color: {final_color}; margin:0;">{final_title}</h1>
-            <p style="font-size: 18px;">{final_desc}</p>
-        </div>
-        """, unsafe_allow_html=True)
 
+        # BIG VERDICT
+        if vibe_check and red_flag_check and baggage_check:
+            st.success("## IT'S A MATCH!")
+            st.markdown("### The stars approve. Put a ring on it.")
+            st.balloons()
+        elif vibe_check and (not red_flag_check or not baggage_check):
+            st.warning("## IT'S COMPLICATED")
+            st.markdown("### The vibes are good, but there's some drama (Dosha/Baggage). Proceed with caution.")
+        else:
+            st.error("## RUN AWAY")
+            st.markdown("### Nope. Toxic energy detected. Do not proceed.")
+
+        # DETAILED CARDS
         c1, c2, c3 = st.columns(3)
 
         with c1:
-            st.info(f"**1. Gun Milan**\n# {score} / 36")
-            if score >= 18: st.success("Pass")
-            else: st.error("Fail")
+            st.metric("Vibe Score", f"{score}/36", delta="Pass" if score>=18 else "Fail")
+            st.caption("Emotional Connection")
 
         with c2:
-            st.info("**2. Mangal Dosha**")
-            st.write(f"Boy: {res['boy_manglik']['label']}")
-            st.write(f"Girl: {res['girl_manglik']['label']}")
-            if manglik_pass: st.success("Compatible")
-            else: st.error("Mismatch")
+            st.metric("Red Flags?", "Clean" if red_flag_check else "Mismatch")
+            st.caption(f"Him: {res['boy_manglik']['label']} | Her: {res['girl_manglik']['label']}")
 
         with c3:
-            st.info(f"**3. Papasamya**")
-            st.write(f"Boy Points: **{b_papa}**")
-            st.write(f"Girl Points: **{g_papa}**")
-            if papa_pass: st.success("Balanced")
-            else: st.warning("Imbalance")
+            st.metric("Life Drama", "Balanced" if baggage_check else "High")
+            st.caption(f"Him: {b_papa} pts | Her: {g_papa} pts")
 
-        with st.expander("See Planetary Positions (Astrologer View)"):
-            t1, t2 = st.columns(2)
-            with t1:
-                st.write("**Boy's Planets**")
-                st.write(b_data['positions'])
-            with t2:
-                st.write("**Girl's Planets**")
-                st.write(g_data['positions'])
-
-            st.write(f"**Boy Timezone:** {b_data['timezone_used']} | **Girl Timezone:** {g_data['timezone_used']}")
+        st.info("TL;DR: Can they get married? **" +
+                ("YES" if (vibe_check and red_flag_check and baggage_check) else "NO") + "**")
 
     else:
-        st.warning("Please fill in all details.")
+        st.warning("Please fill in all details, bestie!")

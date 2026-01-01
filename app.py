@@ -16,7 +16,7 @@ import pytz
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Vedic Marriage Match",
+    page_title="Vedic Marriage Match Pro",
     layout="centered"
 )
 
@@ -36,7 +36,7 @@ class VedicMatchEngine:
             [4, 2, 2, 3, 2, 2, 2, 1, 0, 1, 3, 2, 0, 2], [2, 4, 3, 3, 2, 2, 2, 2, 3, 1, 2, 3, 0, 2],
             [2, 3, 4, 2, 1, 2, 1, 3, 3, 1, 2, 0, 3, 3], [3, 3, 2, 4, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0],
             [2, 2, 1, 2, 4, 2, 1, 2, 2, 1, 0, 2, 1, 1], [2, 2, 2, 1, 2, 4, 0, 2, 2, 1, 2, 3, 3, 2],
-            [2, 2, 1, 1, 1, 0, 4, 2, 2, 2, 2, 2, 1, 2], [1, 2, 3, 1, 2, 2, 2, 4, 3, 0, 3, 2, 2, 1],
+            [2, 2, 1, 1, 1, 0, 4, 2, 2, 2, 2, 1, 2], [1, 2, 3, 1, 2, 2, 2, 4, 3, 0, 3, 2, 2, 1],
             [0, 3, 3, 1, 2, 2, 2, 3, 4, 1, 2, 3, 2, 2], [1, 1, 1, 2, 1, 1, 2, 0, 1, 4, 1, 1, 2, 1],
             [3, 2, 2, 2, 0, 2, 2, 3, 2, 1, 4, 2, 2, 2], [2, 3, 0, 2, 2, 3, 2, 2, 3, 1, 2, 4, 2, 2],
             [0, 0, 3, 0, 1, 3, 1, 2, 2, 2, 2, 2, 4, 2], [2, 2, 3, 0, 1, 2, 2, 1, 2, 1, 2, 2, 2, 4]
@@ -50,36 +50,124 @@ class VedicMatchEngine:
         ]
 
     def get_planet_data(self, dt_obj, lat, lon):
-        # 1. FIND TIMEZONE FROM LAT/LON
+        # 1. TIMEZONE
         tf = TimezoneFinder()
-        timezone_str = tf.timezone_at(lng=lon, lat=lat)
-
-        if timezone_str is None:
-            timezone_str = 'UTC'
-
-        # 2. CONVERT LOCAL TIME TO UTC
+        timezone_str = tf.timezone_at(lng=lon, lat=lat) or 'UTC'
         local_tz = pytz.timezone(timezone_str)
         local_dt = local_tz.localize(dt_obj)
         utc_dt = local_dt.astimezone(pytz.utc)
 
-        # 3. CALCULATE PLANETS
+        # 2. SWISS EPHEMERIS SETUP
         time_dec = utc_dt.hour + (utc_dt.minute / 60.0) + (utc_dt.second / 3600.0)
         jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, time_dec)
         swe.set_sid_mode(swe.SIDM_LAHIRI, 0, 0)
 
-        moon_deg = swe.calc_ut(jd, 1, swe.FLG_SIDEREAL)[0][0]
-        mars_deg = swe.calc_ut(jd, 4, swe.FLG_SIDEREAL)[0][0]
+        # 3. GET LAGNA (ASCENDANT)
+        # houses returns (cusps, ascmc). cusps[0] is Ascendant.
+        cusps, ascmc = swe.houses(jd, lat, lon, b'P')
+        asc_deg = cusps[0]
+
+        # 4. GET PLANETS
+        # We need Sun, Moon, Mars, Jupiter, Venus, Saturn, Rahu(North Node)
+        planets = {
+            "Sun": swe.calc_ut(jd, swe.SUN, swe.FLG_SIDEREAL)[0][0],
+            "Moon": swe.calc_ut(jd, swe.MOON, swe.FLG_SIDEREAL)[0][0],
+            "Mars": swe.calc_ut(jd, swe.MARS, swe.FLG_SIDEREAL)[0][0],
+            "Jupiter": swe.calc_ut(jd, swe.JUPITER, swe.FLG_SIDEREAL)[0][0],
+            "Venus": swe.calc_ut(jd, swe.VENUS, swe.FLG_SIDEREAL)[0][0],
+            "Saturn": swe.calc_ut(jd, swe.SATURN, swe.FLG_SIDEREAL)[0][0],
+            "Rahu": swe.calc_ut(jd, swe.MEAN_NODE, swe.FLG_SIDEREAL)[0][0]
+        }
+        # Ketu is always opposite Rahu
+        planets["Ketu"] = (planets["Rahu"] + 180) % 360
+
+        # Helper to get Rashi (Sign) 0-11
+        def get_rashi(deg): return int(deg / 30)
+
+        # Helper to get House Number (1-12) relative to a start degree (Lagna/Moon/Venus)
+        def get_house(planet_deg, start_deg):
+            return (int(planet_deg/30) - int(start_deg/30) + 12) % 12 + 1
 
         return {
-            "nakshatra": int(moon_deg / 13.333333),
-            "rashi": int(moon_deg / 30),
-            "mars_house": (int(mars_deg/30) - int(moon_deg/30) + 12) % 12 + 1,
+            "nakshatra": int(planets["Moon"] / 13.333333),
+            "rashi": get_rashi(planets["Moon"]),
+            "planets_deg": planets,
+            "asc_deg": asc_deg,
+            # For Papasamya Calculation: We need positions from Lagna, Moon, Venus
+            "positions": {
+                p: {
+                    "Lagna": get_house(deg, asc_deg),
+                    "Moon": get_house(deg, planets["Moon"]),
+                    "Venus": get_house(deg, planets["Venus"]),
+                    "Sign": get_rashi(deg)
+                } for p, deg in planets.items()
+            },
             "timezone_used": timezone_str
         }
 
+    def calculate_papa_points(self, data):
+        """
+        Calculates Papasamya (Dosha Points).
+        Malefics: Sun, Mars, Saturn, Rahu, Ketu.
+        Dosha Houses: 1, 2, 4, 7, 8, 12.
+        Checked from: Lagna, Moon, Venus.
+        """
+        malefics = ["Sun", "Mars", "Saturn", "Rahu", "Ketu"]
+        dosha_houses = [1, 2, 4, 7, 8, 12]
+        total_points = 0
+        breakdown = {}
+
+        for planet in malefics:
+            p_score = 0
+            pos = data['positions'][planet]
+
+            # Check from Lagna
+            if pos['Lagna'] in dosha_houses: p_score += 1
+            # Check from Moon
+            if pos['Moon'] in dosha_houses: p_score += 1
+            # Check from Venus
+            if pos['Venus'] in dosha_houses: p_score += 1
+
+            total_points += p_score
+            breakdown[planet] = p_score
+
+        return total_points, breakdown
+
+    def check_manglik_specifics(self, p_data):
+        # Manglik is mainly checked from Lagna in strict matching,
+        # but apps often verify Moon too. We stick to Lagna/Moon overlap logic or just Lagna.
+        # Here we use the calculated Mars House from Lagna for the primary check.
+
+        house = p_data['positions']['Mars']['Lagna']
+        sign = p_data['positions']['Mars']['Sign']
+        mars_deg = p_data['planets_deg']['Mars']
+
+        # 1. Basic Check
+        is_manglik = house in [1, 2, 4, 7, 8, 12]
+
+        if not is_manglik:
+            return False, "Non-Manglik", "Mars is in a safe house."
+
+        # 2. Cancellations
+        # A. Own House (Aries=0, Scorpio=7) or Exalted (Capricorn=9)
+        if sign in [0, 7, 9]:
+            return False, "Cancelled (Own House)", "Mars is powerful in its own/exalted sign."
+
+        # B. Jupiter Conjunction
+        jup_deg = p_data['planets_deg']['Jupiter']
+        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345:
+             return False, "Cancelled (Jupiter)", "Jupiter's influence calms Mars."
+
+        # C. Sun Combustion
+        sun_deg = p_data['planets_deg']['Sun']
+        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350:
+             return False, "Cancelled (Combust)", "Mars is close to Sun (Combust)."
+
+        return True, "Manglik", f"Mars in House {house} (Dosha active)."
+
     def calculate_match(self, boy, girl):
         scores = {}
-        # Calculations
+        # --- ASHTA KOOTA ---
         scores['Varna'] = 1
         scores['Vashya'] = 2
         dist = (girl['nakshatra'] - boy['nakshatra'] + 27) % 27
@@ -92,17 +180,29 @@ class VedicMatchEngine:
         dist_r = (girl['rashi'] - boy['rashi'] + 12) % 12
         scores['Bhakoot'] = 7 if dist_r in [0, 2, 3, 6, 9, 10] else 0
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
-
         total = sum(scores.values())
-        b_mang = boy['mars_house'] in [1, 2, 4, 7, 8, 12]
-        g_mang = girl['mars_house'] in [1, 2, 4, 7, 8, 12]
 
-        return total, scores, b_mang, g_mang
+        # --- MANGLIK ---
+        b_mang_bool, b_mang_label, b_reason = self.check_manglik_specifics(boy)
+        g_mang_bool, g_mang_label, g_reason = self.check_manglik_specifics(girl)
+
+        # --- PAPASAMYA ---
+        b_papa_total, b_papa_breakdown = self.calculate_papa_points(boy)
+        g_papa_total, g_papa_breakdown = self.calculate_papa_points(girl)
+
+        return {
+            "score": total,
+            "breakdown": scores,
+            "boy_manglik": {"is_manglik": b_mang_bool, "label": b_mang_label, "reason": b_reason},
+            "girl_manglik": {"is_manglik": g_mang_bool, "label": g_mang_label, "reason": g_reason},
+            "boy_papa": {"total": b_papa_total, "details": b_papa_breakdown},
+            "girl_papa": {"total": g_papa_total, "details": g_papa_breakdown}
+        }
 
 # --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    geolocator = Nominatim(user_agent="astro_app_final_v9", timeout=10)
+    geolocator = Nominatim(user_agent="astro_app_pro_final", timeout=10)
     try:
         location = geolocator.geocode(city_name)
         if location:
@@ -113,15 +213,13 @@ def get_coords(city_name):
 
 # --- 3. STREAMLIT UI ---
 st.title("Vedic Marriage Match")
-st.markdown("### Compatibility Checker - powered by Yugma's Intelligence")
-st.caption("Enter birth details below. Location is time-zone sensitive for accuracy.")
+st.markdown("### Professional Compatibility Report")
+st.caption("Includes Ashta Koota, Manglik Exceptions & Papasamya Balance.")
 
-# Allowed Date Range
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
 
 col1, col2 = st.columns(2)
-
 with col1:
     st.header("Boy's Details")
     b_name = st.text_input("Name", "Rahul", key="b_name")
@@ -139,20 +237,15 @@ with col2:
 if st.button("Check Compatibility", type="primary"):
     if b_date and b_time and g_date and g_time:
 
-        # --- VALIDATION ---
-        with st.spinner("Checking locations..."):
+        # --- PROCESS ---
+        with st.spinner("Calculating positions (Lagna, Moon, Venus)..."):
             b_lat, b_lon = get_coords(b_place)
             g_lat, g_lon = get_coords(g_place)
 
-            if b_lat is None:
-                st.error(f"Location not found: '{b_place}'. Please check spelling or try 'Adoor, India'.")
-                st.stop()
-            if g_lat is None:
-                st.error(f"Location not found: '{g_place}'. Please check spelling.")
+            if b_lat is None or g_lat is None:
+                st.error("Location not found. Please check spelling.")
                 st.stop()
 
-        # --- CALCULATION ---
-        with st.spinner("Analyzing stars & timezones..."):
             b_dt = datetime.combine(b_date, b_time)
             g_dt = datetime.combine(g_date, g_time)
 
@@ -160,61 +253,83 @@ if st.button("Check Compatibility", type="primary"):
             b_data = engine.get_planet_data(b_dt, b_lat, b_lon)
             g_data = engine.get_planet_data(g_dt, g_lat, g_lon)
 
-            total, breakdown, b_mang, g_mang = engine.calculate_match(b_data, g_data)
+            res = engine.calculate_match(b_data, g_data)
 
-        # --- LAYMAN INTERPRETATION ---
-        # 1. Verdict Text
-        if total > 24:
-            verdict_short = "Excellent Match"
-            verdict_desc = "Strong planetary support for a happy life."
-            color = "green"
-        elif total >= 18:
-            verdict_short = "Good Match"
-            verdict_desc = "Stable and compatible. A solid foundation for marriage."
-            color = "blue"
+        # --- FINAL DECISION LOGIC ---
+        score = res['score']
+        b_mang = res['boy_manglik']['is_manglik']
+        g_mang = res['girl_manglik']['is_manglik']
+        b_papa = res['boy_papa']['total']
+        g_papa = res['girl_papa']['total']
+
+        # Logic 1: Score
+        score_pass = score >= 18
+
+        # Logic 2: Manglik (Pass if both are same, or one is cancelled)
+        manglik_pass = (b_mang == g_mang)
+
+        # Logic 3: Papasamya (Boy should ideally have equal or more points)
+        # We allow a small tolerance. If Girl has much more trouble than Boy, it's a warning.
+        papa_pass = True
+        if g_papa > (b_papa + 2):
+            papa_pass = False # Strict rule: Girl shouldn't have drastically more dosha
+
+        # --- VERDICT GENERATION ---
+        if score_pass and manglik_pass and papa_pass:
+            final_title = "✅ Marriage Recommended"
+            final_desc = "All major factors (Score, Mangal Dosha, Papa Balance) are favorable."
+            final_color = "green"
+        elif score_pass and (not manglik_pass or not papa_pass):
+            final_title = "⚠️ Consult Astrologer"
+            final_desc = "Score is good, but there is a Dosha Mismatch (Manglik or Papasamya)."
+            final_color = "orange"
         else:
-            verdict_short = "Not Recommended"
-            verdict_desc = "Planetary conflict detected. Consult an expert."
-            color = "red"
+            final_title = "❌ Not Recommended"
+            final_desc = "Compatibility score is too low or severe mismatch detected."
+            final_color = "red"
 
-        # 2. Manglik Text
-        is_match_manglik = (b_mang == g_mang)
-        manglik_text = "Clean & Safe" if is_match_manglik else "Dosha Mismatch"
-
-        # 3. Friendship (Bhakoot)
-        bhakoot_score = breakdown['Bhakoot']
-        friendship_text = "Best Friends" if bhakoot_score == 7 else "Average Bond"
-
-        # 4. Health (Nadi)
-        nadi_score = breakdown['Nadi']
-        health_text = "Perfect Match" if nadi_score == 8 else "Consult Astrologer"
-
-        # --- DISPLAY RESULTS ---
+        # --- DISPLAY ---
         st.divider()
-        st.subheader(f"Results for {b_name} & {g_name}")
-
-        # Big Score Card
         st.markdown(f"""
         <div style="text-align: center; padding: 20px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;">
-            <h2 style="color: {color}; margin:0;">{verdict_short}</h2>
-            <p style="font-size: 18px;">Score: <b>{total} / 36</b></p>
-            <p style="color: grey;">{verdict_desc}</p>
+            <h1 style="color: {final_color}; margin:0;">{final_title}</h1>
+            <p style="font-size: 18px;">{final_desc}</p>
         </div>
         """, unsafe_allow_html=True)
 
-        # UPDATED LAYOUT: 2 Rows x 2 Columns (Fixes readability)
-        row1_c1, row1_c2 = st.columns(2)
-        row1_c1.metric("Manglik Status", manglik_text, help="Checks for Mars Dosha")
-        row1_c2.metric("Emotional Bond", friendship_text, help="Based on Bhakoot")
+        # 3 Column Detail View
+        c1, c2, c3 = st.columns(3)
 
-        row2_c1, row2_c2 = st.columns(2)
-        row2_c1.metric("Health/Genes", health_text, help="Based on Nadi")
-        row2_c2.metric("Temperament", f"{breakdown['Gana']} / 6", help="Based on Gana")
+        with c1:
+            st.info(f"**1. Gun Milan**\n# {score} / 36")
+            if score >= 18: st.success("Pass")
+            else: st.error("Fail")
 
-        # Detailed Expander
-        with st.expander("See Detailed Breakdown"):
-            st.write(f"**Boy's Timezone:** {b_data['timezone_used']} | **Girl's Timezone:** {g_data['timezone_used']}")
-            st.table(breakdown)
+        with c2:
+            st.info("**2. Mangal Dosha**")
+            st.write(f"Boy: {res['boy_manglik']['label']}")
+            st.write(f"Girl: {res['girl_manglik']['label']}")
+            if manglik_pass: st.success("Compatible")
+            else: st.error("Mismatch")
+
+        with c3:
+            st.info(f"**3. Papasamya**")
+            st.write(f"Boy Points: **{b_papa}**")
+            st.write(f"Girl Points: **{g_papa}**")
+            if papa_pass: st.success("Balanced")
+            else: st.warning("Imbalance")
+
+        # Technical Tables
+        with st.expander("See Planetary Positions (Astrologer View)"):
+            t1, t2 = st.columns(2)
+            with t1:
+                st.write("**Boy's Planets**")
+                st.write(b_data['positions'])
+            with t2:
+                st.write("**Girl's Planets**")
+                st.write(g_data['positions'])
+
+            st.write(f"**Boy Timezone:** {b_data['timezone_used']} | **Girl Timezone:** {g_data['timezone_used']}")
 
     else:
-        st.warning("Please fill in all Date and Time fields to proceed.")
+        st.warning("Please fill in all details.")

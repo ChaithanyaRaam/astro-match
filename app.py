@@ -9,14 +9,15 @@ Original file is located at
 
 import streamlit as st
 import swisseph as swe
-from geopy.geocoders import Nominatim
+from geopy.geocoders import MapBox  # <--- CHANGED to MapBox
 from datetime import datetime
 from timezonefinder import TimezoneFinder
 import pytz
+import time
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Vedic Marriage Match Pro",
+    page_title="Astro compatibility - Powered by Yugma's AI Intelligence",
     layout="centered"
 )
 
@@ -25,12 +26,10 @@ class VedicMatchEngine:
     def __init__(self):
         swe.set_ephe_path('') # Use built-in defaults
 
-        # --- Reference Tables ---
+        # Reference Tables
         self.nak_to_nadi = [0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2]
         self.nak_to_gana = [0,1,2,1,0,1,0,0,0, 2,1,1,2,2,2,2,0,0, 2,1,1,0,2,2,1,0,0]
         self.rashi_lords = [2, 5, 3, 1, 0, 3, 5, 2, 4, 6, 6, 4]
-
-        # Yoni Matrix
         self.nak_to_yoni = [0,1,2,3,3,4,5,2,5, 6,6,7,8,9,8,9,10,10, 4,11,13,11,12,0,12,7,1]
         self.yoni_matrix = [
             [4, 2, 2, 3, 2, 2, 2, 1, 0, 1, 3, 2, 0, 2], [2, 4, 3, 3, 2, 2, 2, 2, 3, 1, 2, 3, 0, 2],
@@ -41,8 +40,6 @@ class VedicMatchEngine:
             [3, 2, 2, 2, 0, 2, 2, 3, 2, 1, 4, 2, 2, 2], [2, 3, 0, 2, 2, 3, 2, 2, 3, 1, 2, 4, 2, 2],
             [0, 0, 3, 0, 1, 3, 1, 2, 2, 2, 2, 2, 4, 2], [2, 2, 3, 0, 1, 2, 2, 1, 2, 1, 2, 2, 2, 4]
         ]
-
-        # Maitri Matrix
         self.maitri_matrix = [
              [5, 5, 5, 4, 5, 0, 0], [5, 5, 4, 1, 4, 0.5, 0.5], [5, 4, 5, 0.5, 5, 3, 0.5],
              [4, 1, 0.5, 5, 0.5, 5, 4], [5, 4, 5, 0.5, 5, 0.5, 3], [0, 0.5, 3, 5, 0.5, 5, 5],
@@ -50,25 +47,19 @@ class VedicMatchEngine:
         ]
 
     def get_planet_data(self, dt_obj, lat, lon):
-        # 1. TIMEZONE
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lng=lon, lat=lat) or 'UTC'
         local_tz = pytz.timezone(timezone_str)
         local_dt = local_tz.localize(dt_obj)
         utc_dt = local_dt.astimezone(pytz.utc)
 
-        # 2. SWISS EPHEMERIS SETUP
         time_dec = utc_dt.hour + (utc_dt.minute / 60.0) + (utc_dt.second / 3600.0)
         jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, time_dec)
         swe.set_sid_mode(swe.SIDM_LAHIRI, 0, 0)
 
-        # 3. GET LAGNA (ASCENDANT)
-        # houses returns (cusps, ascmc). cusps[0] is Ascendant.
         cusps, ascmc = swe.houses(jd, lat, lon, b'P')
         asc_deg = cusps[0]
 
-        # 4. GET PLANETS
-        # We need Sun, Moon, Mars, Jupiter, Venus, Saturn, Rahu(North Node)
         planets = {
             "Sun": swe.calc_ut(jd, swe.SUN, swe.FLG_SIDEREAL)[0][0],
             "Moon": swe.calc_ut(jd, swe.MOON, swe.FLG_SIDEREAL)[0][0],
@@ -78,13 +69,9 @@ class VedicMatchEngine:
             "Saturn": swe.calc_ut(jd, swe.SATURN, swe.FLG_SIDEREAL)[0][0],
             "Rahu": swe.calc_ut(jd, swe.MEAN_NODE, swe.FLG_SIDEREAL)[0][0]
         }
-        # Ketu is always opposite Rahu
         planets["Ketu"] = (planets["Rahu"] + 180) % 360
 
-        # Helper to get Rashi (Sign) 0-11
         def get_rashi(deg): return int(deg / 30)
-
-        # Helper to get House Number (1-12) relative to a start degree (Lagna/Moon/Venus)
         def get_house(planet_deg, start_deg):
             return (int(planet_deg/30) - int(start_deg/30) + 12) % 12 + 1
 
@@ -93,7 +80,6 @@ class VedicMatchEngine:
             "rashi": get_rashi(planets["Moon"]),
             "planets_deg": planets,
             "asc_deg": asc_deg,
-            # For Papasamya Calculation: We need positions from Lagna, Moon, Venus
             "positions": {
                 p: {
                     "Lagna": get_house(deg, asc_deg),
@@ -106,68 +92,39 @@ class VedicMatchEngine:
         }
 
     def calculate_papa_points(self, data):
-        """
-        Calculates Papasamya (Dosha Points).
-        Malefics: Sun, Mars, Saturn, Rahu, Ketu.
-        Dosha Houses: 1, 2, 4, 7, 8, 12.
-        Checked from: Lagna, Moon, Venus.
-        """
         malefics = ["Sun", "Mars", "Saturn", "Rahu", "Ketu"]
         dosha_houses = [1, 2, 4, 7, 8, 12]
         total_points = 0
         breakdown = {}
-
         for planet in malefics:
             p_score = 0
             pos = data['positions'][planet]
-
-            # Check from Lagna
             if pos['Lagna'] in dosha_houses: p_score += 1
-            # Check from Moon
             if pos['Moon'] in dosha_houses: p_score += 1
-            # Check from Venus
             if pos['Venus'] in dosha_houses: p_score += 1
-
             total_points += p_score
             breakdown[planet] = p_score
-
         return total_points, breakdown
 
     def check_manglik_specifics(self, p_data):
-        # Manglik is mainly checked from Lagna in strict matching,
-        # but apps often verify Moon too. We stick to Lagna/Moon overlap logic or just Lagna.
-        # Here we use the calculated Mars House from Lagna for the primary check.
-
         house = p_data['positions']['Mars']['Lagna']
         sign = p_data['positions']['Mars']['Sign']
         mars_deg = p_data['planets_deg']['Mars']
 
-        # 1. Basic Check
         is_manglik = house in [1, 2, 4, 7, 8, 12]
-
         if not is_manglik:
             return False, "Non-Manglik", "Mars is in a safe house."
 
-        # 2. Cancellations
-        # A. Own House (Aries=0, Scorpio=7) or Exalted (Capricorn=9)
-        if sign in [0, 7, 9]:
-            return False, "Cancelled (Own House)", "Mars is powerful in its own/exalted sign."
-
-        # B. Jupiter Conjunction
+        if sign in [0, 7, 9]: return False, "Cancelled (Own House)", "Mars is powerful in its own/exalted sign."
         jup_deg = p_data['planets_deg']['Jupiter']
-        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345:
-             return False, "Cancelled (Jupiter)", "Jupiter's influence calms Mars."
-
-        # C. Sun Combustion
+        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return False, "Cancelled (Jupiter)", "Jupiter's influence calms Mars."
         sun_deg = p_data['planets_deg']['Sun']
-        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350:
-             return False, "Cancelled (Combust)", "Mars is close to Sun (Combust)."
+        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return False, "Cancelled (Combust)", "Mars is close to Sun."
 
         return True, "Manglik", f"Mars in House {house} (Dosha active)."
 
     def calculate_match(self, boy, girl):
         scores = {}
-        # --- ASHTA KOOTA ---
         scores['Varna'] = 1
         scores['Vashya'] = 2
         dist = (girl['nakshatra'] - boy['nakshatra'] + 27) % 27
@@ -182,11 +139,9 @@ class VedicMatchEngine:
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
         total = sum(scores.values())
 
-        # --- MANGLIK ---
         b_mang_bool, b_mang_label, b_reason = self.check_manglik_specifics(boy)
         g_mang_bool, g_mang_label, g_reason = self.check_manglik_specifics(girl)
 
-        # --- PAPASAMYA ---
         b_papa_total, b_papa_breakdown = self.calculate_papa_points(boy)
         g_papa_total, g_papa_breakdown = self.calculate_papa_points(girl)
 
@@ -199,11 +154,26 @@ class VedicMatchEngine:
             "girl_papa": {"total": g_papa_total, "details": g_papa_breakdown}
         }
 
-# --- 2. LOCATION UTILS ---
+# --- 2. MAPBOX LOCATION UTILS (PAID API) ---
 @st.cache_data
 def get_coords(city_name):
-    geolocator = Nominatim(user_agent="astro_app_pro_final", timeout=10)
+    # 1. LOCAL BACKUP (Instant results for common tests)
+    known_cities = {
+        "adoor": (9.1529, 76.7356),
+        "chennai": (13.0827, 80.2707),
+        "delhi": (28.7041, 77.1025),
+        "mumbai": (19.0760, 72.8777),
+        "bangalore": (12.9716, 77.5946)
+    }
+    clean = city_name.lower().split(',')[0].strip()
+    if clean in known_cities: return known_cities[clean]
+
+    # 2. MAPBOX API (Using your key)
+    # The key is pasted here. In production, use st.secrets!
+    MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdzNlc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
+
     try:
+        geolocator = MapBox(api_key=MAPBOX_KEY, user_agent="vedic_match_pro_v16")
         location = geolocator.geocode(city_name)
         if location:
             return location.latitude, location.longitude
@@ -214,7 +184,7 @@ def get_coords(city_name):
 # --- 3. STREAMLIT UI ---
 st.title("Vedic Marriage Match")
 st.markdown("### Professional Compatibility Report")
-st.caption("Includes Ashta Koota, Manglik Exceptions & Papasamya Balance.")
+st.caption("Powered by Mapbox API for precise locations.")
 
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
@@ -225,27 +195,31 @@ with col1:
     b_name = st.text_input("Name", "Rahul", key="b_name")
     b_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="b_date")
     b_time = st.time_input("Time of Birth", value=None, key="b_time")
-    b_place = st.text_input("Place of Birth", "Delhi, India", key="b_place")
+    b_place = st.text_input("Place of Birth", "Adoor, India", key="b_place")
 
 with col2:
     st.header("Girl's Details")
     g_name = st.text_input("Name", "Priya", key="g_name")
     g_date = st.date_input("Date of Birth", value=None, min_value=min_date, max_value=max_date, key="g_date")
     g_time = st.time_input("Time of Birth", value=None, key="g_time")
-    g_place = st.text_input("Place of Birth", "Mumbai, India", key="g_place")
+    g_place = st.text_input("Place of Birth", "Chennai, India", key="g_place")
 
 if st.button("Check Compatibility", type="primary"):
     if b_date and b_time and g_date and g_time:
 
         # --- PROCESS ---
-        with st.spinner("Calculating positions (Lagna, Moon, Venus)..."):
+        with st.spinner("Connecting to Mapbox Satellite..."):
             b_lat, b_lon = get_coords(b_place)
             g_lat, g_lon = get_coords(g_place)
 
-            if b_lat is None or g_lat is None:
-                st.error("Location not found. Please check spelling.")
+            if b_lat is None:
+                st.error(f"❌ Location not found: '{b_place}'. Please check spelling.")
+                st.stop()
+            if g_lat is None:
+                st.error(f"❌ Location not found: '{g_place}'. Please check spelling.")
                 st.stop()
 
+        with st.spinner("Analyzing stars & timezones..."):
             b_dt = datetime.combine(b_date, b_time)
             g_dt = datetime.combine(g_date, g_time)
 
@@ -262,26 +236,20 @@ if st.button("Check Compatibility", type="primary"):
         b_papa = res['boy_papa']['total']
         g_papa = res['girl_papa']['total']
 
-        # Logic 1: Score
         score_pass = score >= 18
-
-        # Logic 2: Manglik (Pass if both are same, or one is cancelled)
         manglik_pass = (b_mang == g_mang)
 
-        # Logic 3: Papasamya (Boy should ideally have equal or more points)
-        # We allow a small tolerance. If Girl has much more trouble than Boy, it's a warning.
         papa_pass = True
         if g_papa > (b_papa + 2):
-            papa_pass = False # Strict rule: Girl shouldn't have drastically more dosha
+            papa_pass = False
 
-        # --- VERDICT GENERATION ---
         if score_pass and manglik_pass and papa_pass:
             final_title = "✅ Marriage Recommended"
             final_desc = "All major factors (Score, Mangal Dosha, Papa Balance) are favorable."
             final_color = "green"
         elif score_pass and (not manglik_pass or not papa_pass):
             final_title = "⚠️ Consult Astrologer"
-            final_desc = "Score is good, but there is a Dosha Mismatch (Manglik or Papasamya)."
+            final_desc = "Score is good, but there is a Dosha Mismatch."
             final_color = "orange"
         else:
             final_title = "❌ Not Recommended"
@@ -297,7 +265,6 @@ if st.button("Check Compatibility", type="primary"):
         </div>
         """, unsafe_allow_html=True)
 
-        # 3 Column Detail View
         c1, c2, c3 = st.columns(3)
 
         with c1:
@@ -319,7 +286,6 @@ if st.button("Check Compatibility", type="primary"):
             if papa_pass: st.success("Balanced")
             else: st.warning("Imbalance")
 
-        # Technical Tables
         with st.expander("See Planetary Positions (Astrologer View)"):
             t1, t2 = st.columns(2)
             with t1:

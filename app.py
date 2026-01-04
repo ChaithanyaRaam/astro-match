@@ -15,7 +15,7 @@ from timezonefinder import TimezoneFinder
 import pytz
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Astro Match - Powered by YUGMA's Intelligence", layout="centered")
+st.set_page_config(page_title="AstroSwipe", layout="centered")
 
 # --- 1. CORE ENGINE ---
 class VedicMatchEngine:

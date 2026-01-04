@@ -13,20 +13,14 @@ from geopy.geocoders import MapBox
 from datetime import datetime
 from timezonefinder import TimezoneFinder
 import pytz
-import time
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="Astro compatibility - Powered by Yugma's Intelligence",
-    layout="centered"
-)
+st.set_page_config(page_title="Astro Match - Powered by YUGMA's Intelligence", layout="centered")
 
 # --- 1. CORE ENGINE ---
 class VedicMatchEngine:
     def __init__(self):
         swe.set_ephe_path('')
-
-        # Tables
         self.nak_to_nadi = [0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2, 0,1,2,2,1,0,0,1,2]
         self.nak_to_gana = [0,1,2,1,0,1,0,0,0, 2,1,1,2,2,2,2,0,0, 2,1,1,0,2,2,1,0,0]
         self.rashi_lords = [2, 5, 3, 1, 0, 3, 5, 2, 4, 6, 6, 4]
@@ -88,7 +82,6 @@ class VedicMatchEngine:
                     "Sign": get_rashi(deg)
                 } for p, deg in planets.items()
             },
-            "timezone_used": timezone_str
         }
 
     def calculate_papa_points(self, data):
@@ -102,24 +95,39 @@ class VedicMatchEngine:
             if pos['Venus'] in dosha_houses: total_points += 1
         return total_points
 
-    def check_manglik_specifics(self, p_data):
+    # --- MANGLIK CHECK (Mars) ---
+    def check_manglik_specifics(self, p_data, strict_mode=False):
         house = p_data['positions']['Mars']['Lagna']
         sign = p_data['positions']['Mars']['Sign']
         mars_deg = p_data['planets_deg']['Mars']
 
         is_manglik = house in [1, 2, 4, 7, 8, 12]
-        if not is_manglik:
-            return False, "Green Flag"
+        if not is_manglik: return 0 # Safe
 
-        if sign in [0, 7, 9]: return False, "Cancelled (Power Move)"
+        if strict_mode: return 2
+
+        if sign in [0, 7, 9, 3]: return 1 # Cancelled
         jup_deg = p_data['planets_deg']['Jupiter']
-        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return False, "Cancelled (Lucky)"
+        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return 1 # Cancelled
         sun_deg = p_data['planets_deg']['Sun']
-        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return False, "Cancelled (Chill)"
+        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return 1 # Cancelled
 
-        return True, "Red Flag"
+        return 2 # Danger
 
-    def calculate_match(self, boy, girl):
+    # --- SARPA DOSHA CHECK (Rahu/Ketu) ---
+    def check_sarpa_dosha(self, p_data):
+        rahu_house = p_data['positions']['Rahu']['Lagna']
+        ketu_house = p_data['positions']['Ketu']['Lagna']
+
+        # Sarpa Dosha Houses: 1, 2, 4, 7, 8, 12 (Same as Manglik)
+        dosha_houses = [1, 2, 4, 7, 8, 12]
+
+        has_sarpa = (rahu_house in dosha_houses) or (ketu_house in dosha_houses)
+
+        if has_sarpa: return 2 # Danger (Has Sarpa)
+        return 0 # Safe
+
+    def calculate_match(self, boy, girl, strict_mode):
         scores = {}
         scores['Varna'] = 1
         scores['Vashya'] = 2
@@ -135,35 +143,31 @@ class VedicMatchEngine:
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
         total = sum(scores.values())
 
-        b_mang_bool, b_mang_label = self.check_manglik_specifics(boy)
-        g_mang_bool, g_mang_label = self.check_manglik_specifics(girl)
+        # 1. Manglik Status
+        b_mang = self.check_manglik_specifics(boy, strict_mode)
+        g_mang = self.check_manglik_specifics(girl, strict_mode)
 
-        b_papa_total = self.calculate_papa_points(boy)
-        g_papa_total = self.calculate_papa_points(girl)
+        # 2. Sarpa Status (New!)
+        b_sarpa = self.check_sarpa_dosha(boy)
+        g_sarpa = self.check_sarpa_dosha(girl)
 
-        return {
-            "score": total,
-            "boy_manglik": {"is_manglik": b_mang_bool, "label": b_mang_label},
-            "girl_manglik": {"is_manglik": g_mang_bool, "label": g_mang_label},
-            "boy_papa": b_papa_total,
-            "girl_papa": g_papa_total
-        }
+        # 3. Papa Points
+        b_papa = self.calculate_papa_points(boy)
+        g_papa = self.calculate_papa_points(girl)
+
+        return total, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa
 
 # --- 2. LOCATION UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    # Local Backup
     known_cities = {
-        "adoor": (9.1529, 76.7356),
-        "chennai": (13.0827, 80.2707),
-        "delhi": (28.7041, 77.1025),
-        "mumbai": (19.0760, 72.8777),
+        "adoor": (9.1529, 76.7356), "chennai": (13.0827, 80.2707),
+        "delhi": (28.7041, 77.1025), "mumbai": (19.0760, 72.8777),
         "bangalore": (12.9716, 77.5946)
     }
     clean = city_name.lower().split(',')[0].strip()
     if clean in known_cities: return known_cities[clean]
 
-    # Mapbox API
     MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdzNlc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
     try:
         geolocator = MapBox(api_key=MAPBOX_KEY, user_agent="astro_genz_v1")
@@ -173,100 +177,113 @@ def get_coords(city_name):
     except:
         return None, None
 
-# --- 3. UI: CLEAN GEN Z EDITION ---
-st.title("AstroVibe Check")
-st.markdown("Is it true love or a waste of time? Let's check the stars.")
+# --- 3. UI: SWIPE CARD STYLE ---
+st.title("AstroSwipe")
+st.caption("Quick Compatibility Check")
+
+st.sidebar.header("Settings")
+strict_mode = st.sidebar.checkbox("Strict Mode", value=False, help="Ignores cancellations.")
 
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
 
+# Input Form
 c1, c2 = st.columns(2)
 with c1:
-    st.subheader("Him")
-    b_name = st.text_input("Name", "Rahul", key="b_n")
-    b_date = st.date_input("B-Day", value=None, min_value=min_date, max_value=max_date, key="b_d")
-    b_time = st.time_input("Birth Time", value=None, key="b_t")
-    b_place = st.text_input("City", "Adoor, India", key="b_p")
+    b_name = st.text_input("Boy's Name", "X")
+    b_date = st.date_input("Boy's DOB", datetime(1959, 12, 24), min_value=min_date, max_value=max_date)
+    b_time = st.time_input("Boy's Time", datetime.strptime("06:34", "%H:%M").time())
+    b_place = st.text_input("Boy's City", "Adoor, India")
 
 with c2:
-    st.subheader("Her")
-    g_name = st.text_input("Name", "Priya", key="g_n")
-    g_date = st.date_input("B-Day", value=None, min_value=min_date, max_value=max_date, key="g_d")
-    g_time = st.time_input("Birth Time", value=None, key="g_t")
-    g_place = st.text_input("City", "Chennai, India", key="g_p")
+    g_name = st.text_input("Girl's Name", "Y")
+    g_date = st.date_input("Girl's DOB", datetime(1963, 2, 17), min_value=min_date, max_value=max_date)
+    g_time = st.time_input("Girl's Time", datetime.strptime("09:04", "%H:%M").time())
+    g_place = st.text_input("Girl's City", "Chennai, India")
 
-if st.button("Do We Vibe?", type="primary"):
-    if b_date and b_time and g_date and g_time:
+if st.button("Check Matches", type="primary"):
+    with st.spinner("Calculating..."):
+        b_lat, b_lon = get_coords(b_place)
+        g_lat, g_lon = get_coords(g_place)
 
-        with st.spinner("Reading the stars..."):
-            b_lat, b_lon = get_coords(b_place)
-            g_lat, g_lon = get_coords(g_place)
+        if not b_lat or not g_lat:
+            st.error("Location not found. Try spelling it differently.")
+            st.stop()
 
-            if b_lat is None or g_lat is None:
-                st.error("Bro, I can't find that city. Check spelling.")
-                st.stop()
+        b_dt = datetime.combine(b_date, b_time)
+        g_dt = datetime.combine(g_date, g_time)
 
-            b_dt = datetime.combine(b_date, b_time)
-            g_dt = datetime.combine(g_date, g_time)
+        engine = VedicMatchEngine()
+        b_data = engine.get_planet_data(b_dt, b_lat, b_lon)
+        g_data = engine.get_planet_data(g_dt, g_lat, g_lon)
 
-            engine = VedicMatchEngine()
-            b_data = engine.get_planet_data(b_dt, b_lat, b_lon)
-            g_data = engine.get_planet_data(g_dt, g_lat, g_lon)
-            res = engine.calculate_match(b_data, g_data)
+        # Calculate with Sarpa
+        score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa = engine.calculate_match(b_data, g_data, strict_mode)
 
-        # --- VERDICT LOGIC ---
-        score = res['score']
-        b_mang = res['boy_manglik']['is_manglik']
-        g_mang = res['girl_manglik']['is_manglik']
-        b_papa = res['boy_papa']
-        g_papa = res['girl_papa']
+    # --- VERDICT LOGIC (INCLUDES MANGLIK + SARPA) ---
 
-        # 1. Vibe Check (Score)
-        vibe_check = score >= 18
+    # 1. VIBE SCORE
+    vibe_text = f"{score} / 36"
 
-        # 2. Red Flags (Manglik) - Pass if same status
-        red_flag_check = (b_mang == g_mang)
+    # 2. RED FLAGS LOGIC (Composite of Mars + Sarpa)
+    # Check Manglik Match
+    manglik_ok = False
+    if b_mang == g_mang: manglik_ok = True
+    elif (b_mang <= 1 and g_mang <= 1): manglik_ok = True # Cancelled counts as safe
 
-        # 3. Baggage Check (Papasamya)
-        baggage_check = True
-        if g_papa > (b_papa + 2): baggage_check = False
+    # Check Sarpa Match (Same Rule: Sarpa matches Sarpa, Clean matches Clean)
+    sarpa_ok = False
+    if b_sarpa == g_sarpa: sarpa_ok = True
 
-        # --- FINAL RESULTS ---
-        st.divider()
-
-        # BIG VERDICT
-        # --- SMART LABEL LOGIC ---
-        # Determine the text for the "Red Flags" card
-        if b_mang and g_mang:
-            # Both are Red Flags -> They cancel out!
-            flag_text = "Twin Flames"
-            flag_sub = "Both Red Flags = Perfect Match"
-        elif not b_mang and not g_mang:
-            # Neither are Red Flags -> Safe
-            flag_text = "Green Forest"
-            flag_sub = "No Red Flags detected"
-        else:
-            # One is Red, One is Green -> Clash
-            flag_text = "Mismatch"
-            flag_sub = f"Him: {res['boy_manglik']['label']} | Her: {res['girl_manglik']['label']}"
-
-        # DETAILED CARDS
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-            st.metric("Vibe Score", f"{score}/36", delta="Pass" if score>=18 else "Fail")
-            st.caption("Emotional Connection")
-
-        with c2:
-            st.metric("Red Flags?", flag_text)
-            st.caption(flag_sub)
-
-        with c3:
-            st.metric("Life Drama", "Balanced" if baggage_check else "High")
-            st.caption(f"Him: {b_papa} pts | Her: {g_papa} pts")
-
-        st.info("TL;DR: Can they get married? **" +
-                ("YES" if (vibe_check and red_flag_check and baggage_check) else "NO") + "**")
-
+    # Final Red Flag Verdict
+    flag_safe = False
+    if manglik_ok and sarpa_ok:
+        flag_text = "Safe Match"
+        if (b_mang == 2 or b_sarpa == 2): flag_text = "Twin Flames" # High energy match
+        flag_safe = True
+    elif not manglik_ok:
+        flag_text = "Mangal Dosha"
+    elif not sarpa_ok:
+        flag_text = "Sarpa Dosha"
     else:
-        st.warning("Please fill in all details, bestie!")
+        flag_text = "Mismatch"
+
+    # 3. DRAMA
+    if g_papa > (b_papa + 2):
+        drama_text = "High Drama"
+        drama_safe = False
+    else:
+        drama_text = "Balanced"
+        drama_safe = True
+
+    # 4. RATING
+    if score < 18: rating_text = "Low"
+    elif score < 25: rating_text = "Average"
+    elif score < 32: rating_text = "Good"
+    else: rating_text = "Perfect"
+
+    # FINAL VERDICT
+    if (score >= 18) and flag_safe and drama_safe:
+        verdict = "IT'S A MATCH"
+        sub_verdict = "Swipe Right"
+    elif (score >= 18) and (not flag_safe):
+        verdict = "IT'S COMPLICATED"
+        sub_verdict = "Dosha Mismatch"
+    else:
+        verdict = "NO MATCH"
+        sub_verdict = "Swipe Left"
+
+    # --- UI ---
+    st.divider()
+
+    with st.container():
+        st.markdown(f"<h1 style='text-align: center;'>{verdict}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; color: grey; margin-bottom: 30px;'>{sub_verdict}</p>", unsafe_allow_html=True)
+
+        c1, c2 = st.columns(2)
+        c3, c4 = st.columns(2)
+
+        c1.metric("Vibe Score", vibe_text)
+        c2.metric("Red Flags", flag_text)
+        c3.metric("Drama Level", drama_text)
+        c4.metric("Rating", rating_text)

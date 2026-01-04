@@ -15,7 +15,7 @@ from timezonefinder import TimezoneFinder
 import pytz
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AstroSwipe", layout="centered")
+st.set_page_config(page_title="AstroMatch Powered by YUGMA's Intelligence", layout="centered")
 
 # --- 1. CORE ENGINE ---
 class VedicMatchEngine:
@@ -95,39 +95,45 @@ class VedicMatchEngine:
             if pos['Venus'] in dosha_houses: total_points += 1
         return total_points
 
-    # --- MANGLIK CHECK (Mars) ---
-    def check_manglik_specifics(self, p_data, strict_mode=False):
+    # RETURNS: 0=Safe, 1=Cancelled(Safe), 2=Danger
+    def check_manglik_specifics(self, p_data):
         house = p_data['positions']['Mars']['Lagna']
         sign = p_data['positions']['Mars']['Sign']
         mars_deg = p_data['planets_deg']['Mars']
 
+        # 1. Base Check
         is_manglik = house in [1, 2, 4, 7, 8, 12]
-        if not is_manglik: return 0 # Safe
+        if not is_manglik: return 0
 
-        if strict_mode: return 2
-
-        if sign in [0, 7, 9, 3]: return 1 # Cancelled
+        # 2. Cancellation Checks (Real World Logic)
+        if sign in [0, 7, 9, 3]: return 1
         jup_deg = p_data['planets_deg']['Jupiter']
-        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return 1 # Cancelled
+        if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return 1
         sun_deg = p_data['planets_deg']['Sun']
-        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return 1 # Cancelled
+        if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return 1
 
-        return 2 # Danger
+        return 2
 
-    # --- SARPA DOSHA CHECK (Rahu/Ketu) ---
+    # --- SARPA DOSHA CHECK ---
     def check_sarpa_dosha(self, p_data):
         rahu_house = p_data['positions']['Rahu']['Lagna']
         ketu_house = p_data['positions']['Ketu']['Lagna']
+        rahu_deg = p_data['planets_deg']['Rahu']
+        ketu_deg = p_data['planets_deg']['Ketu']
+        jup_deg = p_data['planets_deg']['Jupiter']
 
-        # Sarpa Dosha Houses: 1, 2, 4, 7, 8, 12 (Same as Manglik)
         dosha_houses = [1, 2, 4, 7, 8, 12]
-
         has_sarpa = (rahu_house in dosha_houses) or (ketu_house in dosha_houses)
 
-        if has_sarpa: return 2 # Danger (Has Sarpa)
-        return 0 # Safe
+        if not has_sarpa: return 0
 
-    def calculate_match(self, boy, girl, strict_mode):
+        # Cancellation logic for Sarpa
+        if abs(rahu_deg - jup_deg) < 15 or abs(rahu_deg - jup_deg) > 345: return 1
+        if abs(ketu_deg - jup_deg) < 15 or abs(ketu_deg - jup_deg) > 345: return 1
+
+        return 2
+
+    def calculate_match(self, boy, girl):
         scores = {}
         scores['Varna'] = 1
         scores['Vashya'] = 2
@@ -143,15 +149,12 @@ class VedicMatchEngine:
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
         total = sum(scores.values())
 
-        # 1. Manglik Status
-        b_mang = self.check_manglik_specifics(boy, strict_mode)
-        g_mang = self.check_manglik_specifics(girl, strict_mode)
+        b_mang = self.check_manglik_specifics(boy)
+        g_mang = self.check_manglik_specifics(girl)
 
-        # 2. Sarpa Status (New!)
         b_sarpa = self.check_sarpa_dosha(boy)
         g_sarpa = self.check_sarpa_dosha(girl)
 
-        # 3. Papa Points
         b_papa = self.calculate_papa_points(boy)
         g_papa = self.calculate_papa_points(girl)
 
@@ -181,9 +184,6 @@ def get_coords(city_name):
 st.title("AstroSwipe")
 st.caption("Quick Compatibility Check")
 
-st.sidebar.header("Settings")
-strict_mode = st.sidebar.checkbox("Strict Mode", value=False, help="Ignores cancellations.")
-
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
 
@@ -207,7 +207,7 @@ if st.button("Check Matches", type="primary"):
         g_lat, g_lon = get_coords(g_place)
 
         if not b_lat or not g_lat:
-            st.error("Location not found. Try spelling it differently.")
+            st.error("Location not found.")
             st.stop()
 
         b_dt = datetime.combine(b_date, b_time)
@@ -217,36 +217,42 @@ if st.button("Check Matches", type="primary"):
         b_data = engine.get_planet_data(b_dt, b_lat, b_lon)
         g_data = engine.get_planet_data(g_dt, g_lat, g_lon)
 
-        # Calculate with Sarpa
-        score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa = engine.calculate_match(b_data, g_data, strict_mode)
+        # Calculate
+        score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa = engine.calculate_match(b_data, g_data)
 
-    # --- VERDICT LOGIC (INCLUDES MANGLIK + SARPA) ---
+    # --- FINAL VERDICT LOGIC ---
 
     # 1. VIBE SCORE
     vibe_text = f"{score} / 36"
 
-    # 2. RED FLAGS LOGIC (Composite of Mars + Sarpa)
-    # Check Manglik Match
+    # 2. RED FLAGS (Composite Logic)
+    # Check Manglik (Safe if same level OR if Cancelled)
     manglik_ok = False
-    if b_mang == g_mang: manglik_ok = True
-    elif (b_mang <= 1 and g_mang <= 1): manglik_ok = True # Cancelled counts as safe
+    if (b_mang == g_mang): manglik_ok = True
+    elif (b_mang <= 1 and g_mang <= 1): manglik_ok = True
 
-    # Check Sarpa Match (Same Rule: Sarpa matches Sarpa, Clean matches Clean)
+    # Check Sarpa (Safe if same level OR if Cancelled)
     sarpa_ok = False
-    if b_sarpa == g_sarpa: sarpa_ok = True
+    if (b_sarpa == g_sarpa): sarpa_ok = True
+    elif (b_sarpa <= 1 and g_sarpa <= 1): sarpa_ok = True
 
-    # Final Red Flag Verdict
+    # OVERRIDE: If Score > 20, we forgive Sarpa/Manglik minor mismatches
+    if score >= 20:
+        if not sarpa_ok: sarpa_ok = True
+        if not manglik_ok and (b_mang <= 1 or g_mang <= 1): manglik_ok = True
+
+    # Determine Text
     flag_safe = False
     if manglik_ok and sarpa_ok:
-        flag_text = "Safe Match"
-        if (b_mang == 2 or b_sarpa == 2): flag_text = "Twin Flames" # High energy match
         flag_safe = True
+        if b_mang == 2 or b_sarpa == 2:
+            flag_text = "Twin Flames"
+        else:
+            flag_text = "Safe Match"
     elif not manglik_ok:
         flag_text = "Mangal Dosha"
-    elif not sarpa_ok:
-        flag_text = "Sarpa Dosha"
     else:
-        flag_text = "Mismatch"
+        flag_text = "Sarpa Dosha"
 
     # 3. DRAMA
     if g_papa > (b_papa + 2):
@@ -266,9 +272,9 @@ if st.button("Check Matches", type="primary"):
     if (score >= 18) and flag_safe and drama_safe:
         verdict = "IT'S A MATCH"
         sub_verdict = "Swipe Right"
-    elif (score >= 18) and (not flag_safe):
+    elif (score >= 18) and (not flag_safe or not drama_safe):
         verdict = "IT'S COMPLICATED"
-        sub_verdict = "Dosha Mismatch"
+        sub_verdict = "Energy Mismatch"
     else:
         verdict = "NO MATCH"
         sub_verdict = "Swipe Left"

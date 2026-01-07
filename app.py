@@ -14,62 +14,51 @@ from datetime import datetime
 from timezonefinder import TimezoneFinder
 import pytz
 
-# --- PAGE CONFIGURATION (TERMINAL STYLE) ---
-st.set_page_config(page_title="ASTRO_KERNEL", layout="centered")
+# --- PAGE CONFIGURATION ---
+st.set_page_config(
+    page_title="AstroSwipe",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 
-# --- CUSTOM CSS FOR HACKER AESTHETIC ---
+# --- CSS FOR MODERN APP CARD LOOK ---
 st.markdown("""
     <style>
-    /* Force Monospace Font */
-    body, .stTextInput, .stButton, .stMarkdown, .stSelectbox {
-        font-family: 'Courier New', Courier, monospace !important;
-    }
-
-    /* Neon Green & Black Theme Override */
+    /* Main Card Styling */
     .stApp {
-        background-color: #0E1117;
-        color: #00FF41;
+        background-color: #f8f9fa; /* Light grey app background */
+    }
+    .result-card {
+        background-color: white;
+        padding: 30px;
+        border-radius: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        text-align: center;
+        margin-top: 20px;
+        margin-bottom: 20px;
     }
 
-    /* Input Fields */
-    .stTextInput input {
-        background-color: #000000;
-        color: #00FF41;
-        border: 1px solid #00FF41;
+    /* Typography */
+    h1 {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.5px;
     }
 
-    /* Button Styling */
-    .stButton>button {
-        background-color: #000000;
-        color: #00FF41;
-        border: 1px solid #00FF41;
-        width: 100%;
-    }
-    .stButton>button:hover {
-        background-color: #00FF41;
-        color: #000000;
-    }
+    /* Verdict Colors */
+    .match { color: #ff4b60; } /* Dating App Pink/Red */
+    .complicated { color: #ff9f43; } /* Orange */
+    .no-match { color: #576574; } /* Grey */
 
-    /* Metric Cards */
+    /* Metric Styling */
     div[data-testid="stMetricValue"] {
-        font-size: 24px;
-        color: #00FF41;
+        font-size: 20px !important;
+        font-weight: 600;
+        color: #2d3436;
     }
     div[data-testid="stMetricLabel"] {
-        color: #008F11;
-        font-size: 14px;
-    }
-
-    /* Custom Receipt Box */
-    .receipt {
-        background-color: #000000;
-        border: 1px solid #00FF41;
-        padding: 20px;
-        font-family: 'Courier New';
-        margin-top: 20px;
-    }
-    .glitch {
-        color: #FF0055;
+        font-size: 14px !important;
+        color: #8395a7;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -160,11 +149,13 @@ class VedicMatchEngine:
         is_manglik = house in [1, 2, 4, 7, 8, 12]
         if not is_manglik: return 0
 
+        # Real World Cancellations
         if sign in [0, 7, 9, 3]: return 1
         jup_deg = p_data['planets_deg']['Jupiter']
         if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return 1
         sun_deg = p_data['planets_deg']['Sun']
         if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return 1
+
         return 2
 
     def check_sarpa_dosha(self, p_data):
@@ -178,12 +169,14 @@ class VedicMatchEngine:
         has_sarpa = (rahu_house in dosha_houses) or (ketu_house in dosha_houses)
 
         if not has_sarpa: return 0
+        # Sarpa Cancellations
         if abs(rahu_deg - jup_deg) < 15 or abs(rahu_deg - jup_deg) > 345: return 1
         if abs(ketu_deg - jup_deg) < 15 or abs(ketu_deg - jup_deg) > 345: return 1
         return 2
 
     def calculate_match(self, boy, girl):
         scores = {}
+        # Core Calculations
         scores['Varna'] = 1
         scores['Vashya'] = 2
         dist = (girl['nakshatra'] - boy['nakshatra'] + 27) % 27
@@ -191,8 +184,7 @@ class VedicMatchEngine:
         scores['Yoni'] = self.yoni_matrix[self.nak_to_yoni[boy['nakshatra']]][self.nak_to_yoni[girl['nakshatra']]]
         scores['Maitri'] = (self.maitri_matrix[self.rashi_lords[boy['rashi']]][self.rashi_lords[girl['rashi']]] +
                             self.maitri_matrix[self.rashi_lords[girl['rashi']]][self.rashi_lords[boy['rashi']]]) / 2
-        bg, gg = self.nak_to_gana[boy['nakshatra']], self.nak_to_gana[girl['nakshatra']]
-        scores['Gana'] = 6 if bg == gg else (0 if {bg, gg} == {0, 2} else 5)
+        scores['Gana'] = 6 if self.nak_to_gana[boy['nakshatra']] == self.nak_to_gana[girl['nakshatra']] else 0
         dist_r = (girl['rashi'] - boy['rashi'] + 12) % 12
         scores['Bhakoot'] = 7 if dist_r in [0, 2, 3, 6, 9, 10] else 0
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
@@ -227,37 +219,39 @@ def get_coords(city_name):
     except:
         return None, None
 
-# --- 3. UI: TERMINAL INTERFACE ---
-st.markdown("### >>> INITIALIZING ASTRO_SWIPE KERNEL v2.0...")
+# --- 3. UI: MODERN DATING APP STYLE ---
+st.title("AstroSwipe")
+st.caption("Check your cosmic compatibility")
 
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
 
-# Input Form
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown("**// USER_01 [MALE]**")
-    b_name = st.text_input("ID_STR", "X", key="b1")
-    b_date = st.date_input("DATE_INIT", datetime(1959, 12, 24), min_value=min_date, max_value=max_date, key="b2")
-    b_time = st.time_input("TIME_INIT", datetime.strptime("06:34", "%H:%M").time(), key="b3")
-    b_place = st.text_input("GEO_LOC", "Adoor, India", key="b4")
+# Input Form in a clean container
+with st.container():
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Boy's Details**")
+        b_name = st.text_input("Name", "X", key="b1")
+        b_date = st.date_input("Date of Birth", datetime(1959, 12, 24), min_value=min_date, max_value=max_date, key="b2")
+        b_time = st.time_input("Time", datetime.strptime("06:34", "%H:%M").time(), key="b3")
+        b_place = st.text_input("City", "Adoor, India", key="b4")
 
-with c2:
-    st.markdown("**// USER_02 [FEMALE]**")
-    g_name = st.text_input("ID_STR", "Y", key="g1")
-    g_date = st.date_input("DATE_INIT", datetime(1963, 2, 17), min_value=min_date, max_value=max_date, key="g2")
-    g_time = st.time_input("TIME_INIT", datetime.strptime("09:04", "%H:%M").time(), key="g3")
-    g_place = st.text_input("GEO_LOC", "Chennai, India", key="g4")
+    with c2:
+        st.markdown("**Girl's Details**")
+        g_name = st.text_input("Name", "Y", key="g1")
+        g_date = st.date_input("Date of Birth", datetime(1963, 2, 17), min_value=min_date, max_value=max_date, key="g2")
+        g_time = st.time_input("Time", datetime.strptime("09:04", "%H:%M").time(), key="g3")
+        g_place = st.text_input("City", "Chennai, India", key="g4")
 
-st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
 
-if st.button("[ EXECUTE_COMPATIBILITY_PROTOCOL ]"):
-    with st.spinner("PARSING CELESTIAL DATA..."):
+if st.button("Check Compatibility", type="primary"):
+    with st.spinner("Analyzing stars..."):
         b_lat, b_lon = get_coords(b_place)
         g_lat, g_lon = get_coords(g_place)
 
         if not b_lat or not g_lat:
-            st.error("ERR: GEO_LOC_NOT_FOUND")
+            st.error("Could not find location. Please check the city name.")
             st.stop()
 
         b_dt = datetime.combine(b_date, b_time)
@@ -270,89 +264,75 @@ if st.button("[ EXECUTE_COMPATIBILITY_PROTOCOL ]"):
         # Calculations
         score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, maitri, nadi = engine.calculate_match(b_data, g_data)
 
-    # --- LOGIC TRANSLATION TO HACKER SPEAK ---
+    # --- ADVANCED LOGIC PROCESSING ---
 
-    # 1. SYNC_RATE (Vibe Score)
-    sync_rate = f"{int((score/36)*100)}%"
+    # 1. Vibe Score
+    vibe_text = f"{int(score)}/36"
 
-    # 2. THREAT_LEVEL (Red Flags)
+    # 2. Red Flags (Threat Level)
+    # Check Manglik & Sarpa
     manglik_ok = (b_mang == g_mang) or (b_mang <= 1 and g_mang <= 1)
     sarpa_ok = (b_sarpa == g_sarpa) or (b_sarpa <= 1 and g_sarpa <= 1)
 
-    # Love Override
-    override_active = False
+    # LOVE OVERRIDE: If Score > 20, we forgive minor technical doshas
     if score >= 20:
         if not sarpa_ok: sarpa_ok = True
         if not manglik_ok and (b_mang <= 1 or g_mang <= 1): manglik_ok = True
-        override_active = True
 
+    # Decide Text
     if manglik_ok and sarpa_ok:
-        if b_mang == 2 or b_sarpa == 2: threat_txt = "NEUTRALIZED"
-        else: threat_txt = "NULL"
-    elif not manglik_ok: threat_txt = "CRITICAL_MANGLIK"
-    else: threat_txt = "CRITICAL_SARPA"
+        if b_mang == 2 or b_sarpa == 2: flag_txt = "Twin Flames"
+        else: flag_txt = "Clean"
+    elif not manglik_ok: flag_txt = "Manglik"
+    else: flag_txt = "Sarpa Dosha"
 
-    # 3. CHAOS_METER (Drama)
-    if g_papa > (b_papa + 2): chaos_txt = "VOLATILE"
-    else: chaos_txt = "STABLE"
+    # 3. Drama (Chaos Meter)
+    if g_papa > (b_papa + 2): drama_txt = "High"
+    else: drama_txt = "Low"
 
-    # 4. CHEMISTRY_LOG (Friends)
-    if maitri >= 4: chem_txt = "LOCKED_IN"
-    elif maitri >= 2: chem_txt = "CASUAL"
-    else: chem_txt = "OPPS"
+    # 4. Friends (Chemistry Log)
+    if maitri >= 4: friends_txt = "Besties"
+    elif maitri >= 2: friends_txt = "Average"
+    else: friends_txt = "Distant"
 
-    # 5. LEGACY_PROTOCOL (Family)
-    if nadi == 8: legacy_txt = "OPTIMAL"
-    else: legacy_txt = "CORRUPTED" # Nadi Dosha
+    # 5. Family (Legacy Protocol)
+    if nadi == 8: family_txt = "Thriving"
+    else: family_txt = "Risky"
 
-    # FINAL_OUTPUT
-    if (score >= 18) and (manglik_ok and sarpa_ok) and (chaos_txt == "STABLE"):
-        sys_status = "SYSTEM_GO"
-        sys_msg = "COMPATIBILITY CONFIRMED."
-        color_code = "#00FF41" # Green
+    # FINAL VERDICT
+    # Safe if: Score is good AND Flags are safe AND Drama is Low
+    if (score >= 18) and (manglik_ok and sarpa_ok) and (drama_txt == "Low"):
+        verdict = "IT'S A MATCH!"
+        sub_verdict = "Swipe Right"
+        card_class = "match"
     elif score >= 18:
-        sys_status = "SYSTEM_WARN"
-        sys_msg = "PROCEED WITH CAUTION. BUGS DETECTED."
-        color_code = "#FFA500" # Orange
+        verdict = "IT'S COMPLICATED"
+        sub_verdict = "Proceed with Caution"
+        card_class = "complicated"
     else:
-        sys_status = "SYSTEM_HALT"
-        sys_msg = "FATAL ERROR. DO NOT PROCEED."
-        color_code = "#FF0055" # Red
+        verdict = "NO MATCH"
+        sub_verdict = "Swipe Left"
+        card_class = "no-match"
 
-    # --- RENDER RECEIPT ---
+    # --- RENDER CARD ---
     st.markdown(f"""
-    <div class="receipt" style="border-color: {color_code};">
-        <h2 style="color: {color_code}; margin-top: 0;">>> DIAGNOSTIC_REPORT</h2>
-        <p>UID_01: {b_name.upper()} | UID_02: {g_name.upper()}</p>
-        <p>TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-        <hr style="border-top: 1px dashed {color_code};">
-
-        <table style="width:100%; color: {color_code};">
-            <tr>
-                <td style="padding: 10px;">SYNC_RATE (VIBE)</td>
-                <td style="text-align: right; font-weight: bold;">{sync_rate} [{score}/36]</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px;">THREAT_LEVEL</td>
-                <td style="text-align: right; font-weight: bold;">{threat_txt}</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px;">CHAOS_METER</td>
-                <td style="text-align: right; font-weight: bold;">{chaos_txt}</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px;">CHEMISTRY_LOG</td>
-                <td style="text-align: right; font-weight: bold;">{chem_txt}</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px;">LEGACY_PROTOCOL</td>
-                <td style="text-align: right; font-weight: bold;">{legacy_txt}</td>
-            </tr>
-        </table>
-
-        <hr style="border-top: 1px dashed {color_code};">
-        <h1 style="text-align: center; color: {color_code}; font-size: 40px; margin-bottom: 0;">{sys_status}</h1>
-        <p style="text-align: center; color: #FFFFFF;">{sys_msg}</p>
-        <p style="text-align: center; font-size: 10px; opacity: 0.7;">OVERRIDE_ACTIVE: {str(override_active).upper()}</p>
+    <div class="result-card">
+        <h1 class="{card_class}">{verdict}</h1>
+        <p style="color: grey; margin-bottom: 30px;">{sub_verdict}</p>
     </div>
     """, unsafe_allow_html=True)
+
+    # Display 5 Metrics in a clean Grid
+    with st.container():
+        # Row 1: The Big 3
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Vibe Score", vibe_text)
+        c2.metric("Red Flags", flag_txt)
+        c3.metric("Drama Level", drama_txt)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Row 2: Social & Family
+        c4, c5 = st.columns(2)
+        c4.metric("Friendship", friends_txt)
+        c5.metric("Family Growth", family_txt)

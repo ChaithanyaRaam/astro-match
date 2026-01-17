@@ -13,55 +13,73 @@ from geopy.geocoders import MapBox
 from datetime import datetime
 from timezonefinder import TimezoneFinder
 import pytz
+import time
+import google.generativeai as genai # NEW: Import Google AI
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="AstroSwipe",
+    page_title="Yugma-Together & Forever starts here",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS FOR MODERN APP CARD LOOK ---
+# --- SESSION STATE INITIALIZATION ---
+if 'step' not in st.session_state:
+    st.session_state.step = 1
+if 'match_data' not in st.session_state:
+    st.session_state.match_data = {}
+
+# --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* Main Card Styling */
-    .stApp {
-        background-color: #f8f9fa; /* Light grey app background */
-    }
-    .result-card {
+    .stApp { background-color: #f8f9fa; }
+
+    /* Card Styles */
+    .profile-card {
         background-color: white;
         padding: 30px;
         border-radius: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         text-align: center;
-        margin-top: 20px;
         margin-bottom: 20px;
     }
 
-    /* Typography */
-    h1 {
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        font-weight: 700;
-        letter-spacing: -0.5px;
+    /* Pop-up Insight Style */
+    .insight-box {
+        background-color: #ffffff;
+        border-left: 5px solid #ff4b60;
+        padding: 25px;
+        border-radius: 10px;
+        margin: 20px 0;
+        text-align: left;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     }
 
-    /* Verdict Colors */
-    .match { color: #ff4b60; } /* Dating App Pink/Red */
-    .complicated { color: #ff9f43; } /* Orange */
-    .no-match { color: #576574; } /* Grey */
-
-    /* Metric Styling */
-    div[data-testid="stMetricValue"] {
-        font-size: 20px !important;
-        font-weight: 600;
+    .insight-line {
+        font-size: 16px;
+        margin-bottom: 12px;
         color: #2d3436;
+        font-family: 'Helvetica Neue', sans-serif;
+        line-height: 1.5;
     }
-    div[data-testid="stMetricLabel"] {
-        font-size: 14px !important;
-        color: #8395a7;
-    }
+
+    .insight-emoji { font-size: 18px; margin-right: 8px; }
+
+    /* Typography */
+    h1 { font-family: 'Helvetica Neue', sans-serif; font-weight: 700; letter-spacing: -0.5px; }
+    .match { color: #ff4b60; }
+    .complicated { color: #ff9f43; }
+    .no-match { color: #576574; }
+
+    div[data-testid="stMetricValue"] { font-size: 20px !important; font-weight: 600; color: #2d3436; }
+    div[data-testid="stMetricLabel"] { font-size: 14px !important; color: #8395a7; }
     </style>
     """, unsafe_allow_html=True)
+
+# --- SIDEBAR FOR API KEY ---
+with st.sidebar:
+    st.header("⚙️ Engine Room")
+    api_key = st.text_input("AIzaSyAKXWaBb98VofB6dPY3hn3LA3oOIRQwm80", type="password", help="Get free key from Google AI Studio")
 
 # --- 1. CORE ENGINE ---
 class VedicMatchEngine:
@@ -145,17 +163,13 @@ class VedicMatchEngine:
         house = p_data['positions']['Mars']['Lagna']
         sign = p_data['positions']['Mars']['Sign']
         mars_deg = p_data['planets_deg']['Mars']
-
         is_manglik = house in [1, 2, 4, 7, 8, 12]
         if not is_manglik: return 0
-
-        # Real World Cancellations
         if sign in [0, 7, 9, 3]: return 1
         jup_deg = p_data['planets_deg']['Jupiter']
         if abs(mars_deg - jup_deg) < 15 or abs(mars_deg - jup_deg) > 345: return 1
         sun_deg = p_data['planets_deg']['Sun']
         if abs(mars_deg - sun_deg) < 10 or abs(mars_deg - sun_deg) > 350: return 1
-
         return 2
 
     def check_sarpa_dosha(self, p_data):
@@ -164,19 +178,15 @@ class VedicMatchEngine:
         rahu_deg = p_data['planets_deg']['Rahu']
         ketu_deg = p_data['planets_deg']['Ketu']
         jup_deg = p_data['planets_deg']['Jupiter']
-
         dosha_houses = [1, 2, 4, 7, 8, 12]
         has_sarpa = (rahu_house in dosha_houses) or (ketu_house in dosha_houses)
-
         if not has_sarpa: return 0
-        # Sarpa Cancellations
         if abs(rahu_deg - jup_deg) < 15 or abs(rahu_deg - jup_deg) > 345: return 1
         if abs(ketu_deg - jup_deg) < 15 or abs(ketu_deg - jup_deg) > 345: return 1
         return 2
 
     def calculate_match(self, boy, girl):
         scores = {}
-        # Core Calculations
         scores['Varna'] = 1
         scores['Vashya'] = 2
         dist = (girl['nakshatra'] - boy['nakshatra'] + 27) % 27
@@ -189,150 +199,255 @@ class VedicMatchEngine:
         scores['Bhakoot'] = 7 if dist_r in [0, 2, 3, 6, 9, 10] else 0
         scores['Nadi'] = 0 if self.nak_to_nadi[boy['nakshatra']] == self.nak_to_nadi[girl['nakshatra']] else 8
         total = sum(scores.values())
-
         b_mang = self.check_manglik_specifics(boy)
         g_mang = self.check_manglik_specifics(girl)
         b_sarpa = self.check_sarpa_dosha(boy)
         g_sarpa = self.check_sarpa_dosha(girl)
         b_papa = self.calculate_papa_points(boy)
         g_papa = self.calculate_papa_points(girl)
-
         return total, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, scores['Maitri'], scores['Nadi']
 
-# --- 2. LOCATION UTILS ---
+# --- 2. AI GENERATOR (GEMINI) ---
+def generate_ai_insights(api_key, match_data):
+    """
+    Uses Google Gemini to generate modern, Gen Z insights.
+    Fallback to hardcoded if no API key is provided.
+    """
+    if not api_key:
+        return generate_fallback_insights(match_data) # Use old logic if no key
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-pro')
+
+        prompt = f"""
+        Act as a modern, witty Gen Z dating coach. Analyze this couple:
+
+        Boy: {match_data['b_name']} ({', '.join(match_data['b_traits'])}) Likes: {', '.join(match_data['b_int'])}
+        Girl: {match_data['g_name']} ({', '.join(match_data['g_traits'])}) Likes: {', '.join(match_data['g_int'])}
+
+        Compatibility Score: {match_data['score']}/36
+        Red Flags: {match_data['flag_txt']}
+        Drama Level: {match_data['drama_txt']}
+
+        Task: Write 3 short, punchy lines about their relationship vibe.
+        Rules:
+        1. NO ASTROLOGY JARGON (No 'dosha', 'mars', 'planets').
+        2. Use modern slang (e.g., 'green flags', 'chaos', 'vibe check', 'power couple').
+        3. Be specific to their interests/traits if possible.
+        4. Format exactly like this:
+        Title 1: [Text]
+        Title 2: [Text]
+        Title 3: [Text]
+        """
+
+        response = model.generate_content(prompt)
+        text = response.text
+
+        # Simple parsing (splitting by newlines and cleaning)
+        lines = [line for line in text.split('\n') if line.strip()][:3]
+
+        # Fallback if AI formatting is weird
+        if len(lines) < 3: return generate_fallback_insights(match_data)
+
+        # Add Emojis manually to ensure UI consistency if AI forgets
+        final_lines = [
+            f"<span class='insight-emoji'>🔥</span> {lines[0]}",
+            f"<span class='insight-emoji'>✨</span> {lines[1]}",
+            f"<span class='insight-emoji'>👀</span> {lines[2]}"
+        ]
+        return final_lines
+
+    except Exception as e:
+        return generate_fallback_insights(match_data)
+
+def generate_fallback_insights(data):
+    # This is the "Hardcoded" version you liked, used as backup
+    score = data['score']
+    lines = []
+
+    # LINE 1
+    if score >= 28: lines.append("<span class='insight-emoji'>🔥</span> <b>Insane Chemistry:</b> Rare and magnetic energy.")
+    elif score >= 18: lines.append("<span class='insight-emoji'>✨</span> <b>Solid Potential:</b> Great foundation, keep it real.")
+    else: lines.append("<span class='insight-emoji'>🎢</span> <b>Wild Card:</b> Bumpy ride, but maybe you like the challenge?")
+
+    # LINE 2
+    if "Fire Hand (High Energy)" in data['b_traits'] or "Fire Hand (High Energy)" in data['g_traits']:
+         lines.append("<span class='insight-emoji'>⚡</span> <b>High Octane:</b> Never bored, just don't burn out.")
+    elif "Earth Hand (Stable)" in data['b_traits']:
+         lines.append("<span class='insight-emoji'>🌿</span> <b>Power Couple:</b> Focused and grounded.")
+    else:
+         lines.append("<span class='insight-emoji'>🧠</span> <b>Mental Match:</b> Top-tier conversations.")
+
+    # LINE 3
+    if data['flag_txt'] != "Clean":
+        lines.append("<span class='insight-emoji'>🚩</span> <b>Intensity Alert:</b> Give each other space or you'll clash.")
+    elif data['drama_txt'] == "High":
+        lines.append("<span class='insight-emoji'>👜</span> <b>Baggage Check:</b> Be patient with each other.")
+    else:
+        lines.append("<span class='insight-emoji'>✅</span> <b>Green Flags:</b> Smooth sailing ahead.")
+
+    return lines
+
+# --- 3. UTILS ---
 @st.cache_data
 def get_coords(city_name):
-    known_cities = {
-        "adoor": (9.1529, 76.7356), "chennai": (13.0827, 80.2707),
-        "delhi": (28.7041, 77.1025), "mumbai": (19.0760, 72.8777),
-        "bangalore": (12.9716, 77.5946)
-    }
+    known_cities = { "adoor": (9.1529, 76.7356), "chennai": (13.0827, 80.2707), "delhi": (28.7041, 77.1025), "mumbai": (19.0760, 72.8777) }
     clean = city_name.lower().split(',')[0].strip()
     if clean in known_cities: return known_cities[clean]
-
-    MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdzNlc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
     try:
-        geolocator = MapBox(api_key=MAPBOX_KEY, user_agent="astro_genz_v1")
-        location = geolocator.geocode(city_name)
-        if location: return location.latitude, location.longitude
-        return None, None
-    except:
-        return None, None
+        geolocator = MapBox(api_key="pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdzNlc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw", user_agent="astro_genz_v1")
+        loc = geolocator.geocode(city_name)
+        return (loc.latitude, loc.longitude) if loc else (None, None)
+    except: return None, None
 
-# --- 3. UI: MODERN DATING APP STYLE ---
+def reset_app():
+    st.session_state.step = 1
+    st.session_state.match_data = {}
+
+# --- 4. UI FLOW ---
 st.title("AstroSwipe")
-st.caption("Check your cosmic compatibility")
 
 min_date = datetime(1900, 1, 1)
 max_date = datetime(2100, 12, 31)
+palm_traits_list = ["Curved Heart Line (Emotional)", "Straight Heart Line (Logical)", "Fire Hand (High Energy)", "Earth Hand (Stable)", "Air Hand (Intellectual)"]
+interests_list = ["Travel & Adventure", "Gym & Fitness", "Art & Poetry", "Finance & Crypto", "Gaming", "Foodie", "Deep Talks"]
 
-# Input Form in a clean container
-with st.container():
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**Boy's Details**")
-        b_name = st.text_input("Name", "X", key="b1")
-        b_date = st.date_input("Date of Birth", datetime(1959, 12, 24), min_value=min_date, max_value=max_date, key="b2")
-        b_time = st.time_input("Time", datetime.strptime("06:34", "%H:%M").time(), key="b3")
-        b_place = st.text_input("City", "Adoor, India", key="b4")
+# --- STEP 1: INPUTS ---
+if st.session_state.step == 1:
+    st.caption("Enter details to find your cosmic match.")
 
-    with c2:
-        st.markdown("**Girl's Details**")
-        g_name = st.text_input("Name", "Y", key="g1")
-        g_date = st.date_input("Date of Birth", datetime(1963, 2, 17), min_value=min_date, max_value=max_date, key="g2")
-        g_time = st.time_input("Time", datetime.strptime("09:04", "%H:%M").time(), key="g3")
-        g_place = st.text_input("City", "Chennai, India", key="g4")
+    with st.expander("Boy's Profile", expanded=True):
+        c1, c2 = st.columns(2)
+        b_name = c1.text_input("Name", "X", key="b1")
+        b_date = c1.date_input("DOB", datetime(1959, 12, 24), min_value=min_date, max_value=max_date, key="b2")
+        b_time = c1.time_input("Time", datetime.strptime("06:34", "%H:%M").time(), key="b3")
+        b_place = c1.text_input("City", "Adoor, India", key="b4")
+        b_traits = c2.multiselect("Palm Traits", palm_traits_list, default=[palm_traits_list[1]], key="b_traits")
+        b_int = c2.multiselect("Interests", interests_list, default=[interests_list[3]], key="b_int")
 
-st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("Girl's Profile", expanded=True):
+        c1, c2 = st.columns(2)
+        g_name = c1.text_input("Name", "Y", key="g1")
+        g_date = c1.date_input("DOB", datetime(1963, 2, 17), min_value=min_date, max_value=max_date, key="g2")
+        g_time = c1.time_input("Time", datetime.strptime("09:04", "%H:%M").time(), key="g3")
+        g_place = c1.text_input("City", "Chennai, India", key="g4")
+        g_traits = c2.multiselect("Palm Traits", palm_traits_list, default=[palm_traits_list[0]], key="g_traits")
+        g_int = c2.multiselect("Interests", interests_list, default=[interests_list[2]], key="g_int")
 
-if st.button("Check Compatibility", type="primary"):
-    with st.spinner("Analyzing stars..."):
-        b_lat, b_lon = get_coords(b_place)
-        g_lat, g_lon = get_coords(g_place)
+    if st.button("Check Compatibility", type="primary"):
+        with st.spinner("Analyzing Vibes..."):
+            b_lat, b_lon = get_coords(b_place)
+            g_lat, g_lon = get_coords(g_place)
 
-        if not b_lat or not g_lat:
-            st.error("Could not find location. Please check the city name.")
-            st.stop()
+            if not b_lat:
+                st.error("Location Error")
+                st.stop()
 
-        b_dt = datetime.combine(b_date, b_time)
-        g_dt = datetime.combine(g_date, g_time)
+            engine = VedicMatchEngine()
+            b_d = engine.get_planet_data(datetime.combine(b_date, b_time), b_lat, b_lon)
+            g_d = engine.get_planet_data(datetime.combine(g_date, g_time), g_lat, g_lon)
 
-        engine = VedicMatchEngine()
-        b_data = engine.get_planet_data(b_dt, b_lat, b_lon)
-        g_data = engine.get_planet_data(g_dt, g_lat, g_lon)
+            # CALCULATION
+            score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, maitri, nadi = engine.calculate_match(b_d, g_d)
 
-        # Calculations
-        score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, maitri, nadi = engine.calculate_match(b_data, g_data)
+            # LOGIC
+            manglik_ok = (b_mang == g_mang) or (b_mang <= 1 and g_mang <= 1)
+            sarpa_ok = (b_sarpa == g_sarpa) or (b_sarpa <= 1 and g_sarpa <= 1)
+            if score >= 20:
+                if not sarpa_ok: sarpa_ok = True
+                if not manglik_ok and (b_mang <= 1 or g_mang <= 1): manglik_ok = True
 
-    # --- ADVANCED LOGIC PROCESSING ---
+            flag_txt = "Clean" if (manglik_ok and sarpa_ok) else "Dosha Mismatch"
+            drama_txt = "High" if g_papa > (b_papa + 2) else "Low"
 
-    # 1. Vibe Score
-    vibe_text = f"{int(score)}/36"
+            # Save to Session State
+            st.session_state.match_data = {
+                "score": int(score),
+                "flag_txt": flag_txt,
+                "drama_txt": drama_txt,
+                "manglik_ok": manglik_ok,
+                "b_traits": b_traits,
+                "g_traits": g_traits,
+                "b_int": b_int,
+                "g_int": g_int,
+                "b_name": b_name,
+                "g_name": g_name
+            }
+            st.session_state.step = 2
+            st.rerun()
 
-    # 2. Red Flags (Threat Level)
-    # Check Manglik & Sarpa
-    manglik_ok = (b_mang == g_mang) or (b_mang <= 1 and g_mang <= 1)
-    sarpa_ok = (b_sarpa == g_sarpa) or (b_sarpa <= 1 and g_sarpa <= 1)
+# --- STEP 2: ASTRO CARD + FIRST SWIPE ---
+elif st.session_state.step == 2:
+    data = st.session_state.match_data
 
-    # LOVE OVERRIDE: If Score > 20, we forgive minor technical doshas
-    if score >= 20:
-        if not sarpa_ok: sarpa_ok = True
-        if not manglik_ok and (b_mang <= 1 or g_mang <= 1): manglik_ok = True
-
-    # Decide Text
-    if manglik_ok and sarpa_ok:
-        if b_mang == 2 or b_sarpa == 2: flag_txt = "Twin Flames"
-        else: flag_txt = "Clean"
-    elif not manglik_ok: flag_txt = "Manglik"
-    else: flag_txt = "Sarpa Dosha"
-
-    # 3. Drama (Chaos Meter)
-    if g_papa > (b_papa + 2): drama_txt = "High"
-    else: drama_txt = "Low"
-
-    # 4. Friends (Chemistry Log)
-    if maitri >= 4: friends_txt = "Besties"
-    elif maitri >= 2: friends_txt = "Average"
-    else: friends_txt = "Distant"
-
-    # 5. Family (Legacy Protocol)
-    if nadi == 8: family_txt = "Thriving"
-    else: family_txt = "Risky"
-
-    # FINAL VERDICT
-    # Safe if: Score is good AND Flags are safe AND Drama is Low
-    if (score >= 18) and (manglik_ok and sarpa_ok) and (drama_txt == "Low"):
+    # Verdict Logic
+    if data['score'] >= 18 and data['flag_txt'] == "Clean":
         verdict = "IT'S A MATCH!"
-        sub_verdict = "Swipe Right"
-        card_class = "match"
-    elif score >= 18:
+        cls = "match"
+    elif data['score'] >= 18:
         verdict = "IT'S COMPLICATED"
-        sub_verdict = "Proceed with Caution"
-        card_class = "complicated"
+        cls = "complicated"
     else:
         verdict = "NO MATCH"
-        sub_verdict = "Swipe Left"
-        card_class = "no-match"
+        cls = "no-match"
 
-    # --- RENDER CARD ---
+    # Render Card
     st.markdown(f"""
-    <div class="result-card">
-        <h1 class="{card_class}">{verdict}</h1>
-        <p style="color: grey; margin-bottom: 30px;">{sub_verdict}</p>
+    <div class="profile-card">
+        <h1 class="{cls}">{verdict}</h1>
+        <h2 style="font-size: 40px; margin: 0;">{data['score']}/36</h2>
+        <p style="font-size: 12px; color: #b2bec3;">COMPATIBILITY SCORE</p>
     </div>
     """, unsafe_allow_html=True)
 
-    # Display 5 Metrics in a clean Grid
-    with st.container():
-        # Row 1: The Big 3
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Vibe Score", vibe_text)
-        c2.metric("Red Flags", flag_txt)
-        c3.metric("Drama Level", drama_txt)
+    c1, c2 = st.columns(2)
+    c1.metric("Red Flags", data['flag_txt'])
+    c2.metric("Drama Level", data['drama_txt'])
 
-        st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-        # Row 2: Social & Family
-        c4, c5 = st.columns(2)
-        c4.metric("Friendship", friends_txt)
-        c5.metric("Family Growth", family_txt)
+    col1, col2 = st.columns(2)
+    if col1.button("❌ Swipe Left"):
+        st.error("Not a match. Moving on...")
+        time.sleep(1.5)
+        reset_app()
+        st.rerun()
+
+    if col2.button("💚 Swipe Right"):
+        st.session_state.step = 3
+        st.rerun()
+
+# --- STEP 3: THE MODERN INSIGHT POP-UP ---
+elif st.session_state.step == 3:
+    data = st.session_state.match_data
+
+    # Generate Insight (Uses AI if API Key present, else Fallback)
+    with st.spinner("Generating Vibe Check..."):
+        insights = generate_ai_insights(api_key, data)
+
+    st.markdown("### 🔮 The Vibe Check")
+    st.caption(f"Here's the honest breakdown for {data['b_name']} & {data['g_name']}")
+
+    # The Pop-up Box
+    st.markdown(f"""
+    <div class="insight-box">
+        <div class="insight-line">{insights[0]}</div>
+        <div class="insight-line">{insights[1]}</div>
+        <div class="insight-line" style="font-weight: 500;">{insights[2]}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.info("Based on this, do you want to connect?")
+
+    c1, c2 = st.columns(2)
+    if c1.button("Nah, cancel"):
+        reset_app()
+        st.rerun()
+
+    if c2.button("🚀 Send Request", type="primary"):
+        st.balloons()
+        st.success(f"Request Sent to {data['g_name']}! Fingers crossed 💌")
+        if st.button("Check Another Couple"):
+            reset_app()
+            st.rerun()

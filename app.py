@@ -15,74 +15,106 @@ from timezonefinder import TimezoneFinder
 import pytz
 import time
 import google.generativeai as genai
-from PIL import Image # NEW: For handling images
+from PIL import Image
+import os
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="AstroSwipe",
+    page_title="Yugma",
+    page_icon="🧡",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# --- SESSION STATE INITIALIZATION ---
-if 'step' not in st.session_state:
-    st.session_state.step = 1
-if 'match_data' not in st.session_state:
-    st.session_state.match_data = {}
+# --- SESSION STATE ---
+if 'step' not in st.session_state: st.session_state.step = 1
+if 'match_data' not in st.session_state: st.session_state.match_data = {}
+if 'lane' not in st.session_state: st.session_state.lane = "Connect"
 
-# --- CSS STYLING ---
+# --- CSS: YUGMA BRANDING ---
 st.markdown("""
     <style>
-    .stApp { background-color: #f8f9fa; }
+    .stApp { background-color: #fffaf0; } /* Soft Cream Background for Yugma */
 
-    /* Card Styles */
-    .profile-card {
-        background-color: white;
-        padding: 30px;
-        border-radius: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        text-align: center;
+    /* Top Nav Styling */
+    .lane-nav {
+        display: flex;
+        justify-content: center;
         margin-bottom: 20px;
-    }
-
-    /* Pop-up Insight Style */
-    .insight-box {
-        background-color: #ffffff;
-        border-left: 5px solid #ff4b60;
-        padding: 25px;
-        border-radius: 10px;
-        margin: 20px 0;
-        text-align: left;
+        background: white;
+        padding: 10px;
+        border-radius: 30px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     }
 
-    .insight-line {
-        font-size: 16px;
-        margin-bottom: 12px;
-        color: #2d3436;
-        font-family: 'Helvetica Neue', sans-serif;
-        line-height: 1.5;
+    /* Mode B: The Reality Card */
+    .reality-card {
+        background-color: white;
+        border: 1px solid #f3a683;
+        border-radius: 15px;
+        padding: 25px;
+        text-align: left;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 20px rgba(243, 166, 131, 0.15);
     }
 
-    .insight-emoji { font-size: 18px; margin-right: 8px; }
+    .strength-tag { color: #e15f41; font-weight: bold; letter-spacing: 0.5px; }
+    .watchout-tag { color: #596275; font-weight: bold; letter-spacing: 0.5px; }
 
     /* Typography */
-    h1 { font-family: 'Helvetica Neue', sans-serif; font-weight: 700; letter-spacing: -0.5px; }
-    .match { color: #ff4b60; }
-    .complicated { color: #ff9f43; }
-    .no-match { color: #576574; }
+    h1 { font-family: 'Georgia', serif; color: #e15f41; }
+    h2 { font-family: 'Helvetica Neue', sans-serif; color: #303952; }
+    p { font-family: 'Helvetica Neue', sans-serif; color: #596275; }
 
-    div[data-testid="stMetricValue"] { font-size: 20px !important; font-weight: 600; color: #2d3436; }
-    div[data-testid="stMetricLabel"] { font-size: 14px !important; color: #8395a7; }
+    /* Buttons */
+    .stButton>button {
+        border-radius: 30px;
+        height: 50px;
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SIDEBAR FOR API KEY ---
-with st.sidebar:
-    st.header("⚙️ Engine Room")
-    api_key = st.text_input("AIzaSyAKXWaBb98VofB6dPY3hn3LA3oOIRQwm80", type="password")
+# --- LOGO HEADER ---
+# Replace 'yugma_logo.png' with your actual filename if different
+if os.path.exists("yugma_logo.png"):
+    st.image("yugma_logo.png", width=200)
+else:
+    st.markdown("<h1>Yugma</h1>", unsafe_allow_html=True) # Fallback text if image missing
 
-# --- 1. CORE ASTRO ENGINE ---
+# --- SIDEBAR (Settings) ---
+with st.sidebar:
+    st.header("⚙️ Yugma Core")
+    api_key = st.text_input("Gemini API Key", type="password")
+
+    st.divider()
+    if st.button("Reset Experience"):
+        st.session_state.step = 1
+        st.session_state.match_data = {}
+        st.session_state.b_img = None
+        st.session_state.g_img = None
+        st.rerun()
+
+# --- 1. THE LANE SWITCHER ---
+c1, c2, c3 = st.columns([1,1,1])
+with c1:
+    if st.button("🍬 Browse", use_container_width=True): st.session_state.lane = "Browse"
+with c2:
+    if st.button("🔮 Connect", use_container_width=True): st.session_state.lane = "Connect"
+with c3:
+    if st.button("💍 Partner", use_container_width=True): st.session_state.lane = "Partner"
+
+# Lane Description
+if st.session_state.lane == "Browse":
+    st.caption("MODE A: Casual Discovery (Visual & Fast)")
+elif st.session_state.lane == "Connect":
+    st.caption("MODE B: The Rational Bridge (Astro + Palmistry)")
+else:
+    st.caption("MODE C: Family & Values (The Checklist)")
+
+st.divider()
+
+# --- 2. ASTRO ENGINE (Backend) ---
 class VedicMatchEngine:
     def __init__(self):
         swe.set_ephe_path('')
@@ -111,14 +143,11 @@ class VedicMatchEngine:
         local_tz = pytz.timezone(timezone_str)
         local_dt = local_tz.localize(dt_obj)
         utc_dt = local_dt.astimezone(pytz.utc)
-
         time_dec = utc_dt.hour + (utc_dt.minute / 60.0) + (utc_dt.second / 3600.0)
         jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, time_dec)
         swe.set_sid_mode(swe.SIDM_LAHIRI, 0, 0)
-
         cusps, ascmc = swe.houses(jd, lat, lon, b'P')
         asc_deg = cusps[0]
-
         planets = {
             "Sun": swe.calc_ut(jd, swe.SUN, swe.FLG_SIDEREAL)[0][0],
             "Moon": swe.calc_ut(jd, swe.MOON, swe.FLG_SIDEREAL)[0][0],
@@ -129,11 +158,8 @@ class VedicMatchEngine:
             "Rahu": swe.calc_ut(jd, swe.MEAN_NODE, swe.FLG_SIDEREAL)[0][0]
         }
         planets["Ketu"] = (planets["Rahu"] + 180) % 360
-
         def get_rashi(deg): return int(deg / 30)
-        def get_house(planet_deg, start_deg):
-            return (int(planet_deg/30) - int(start_deg/30) + 12) % 12 + 1
-
+        def get_house(planet_deg, start_deg): return (int(planet_deg/30) - int(start_deg/30) + 12) % 12 + 1
         return {
             "nakshatra": int(planets["Moon"] / 13.333333),
             "rashi": get_rashi(planets["Moon"]),
@@ -187,9 +213,7 @@ class VedicMatchEngine:
         return 2
 
     def calculate_match(self, boy, girl):
-        scores = {}
-        scores['Varna'] = 1
-        scores['Vashya'] = 2
+        scores = {'Varna': 1, 'Vashya': 2}
         dist = (girl['nakshatra'] - boy['nakshatra'] + 27) % 27
         scores['Tara'] = 3 if (dist % 9) not in [0,2,4,6] else 1.5
         scores['Yoni'] = self.yoni_matrix[self.nak_to_yoni[boy['nakshatra']]][self.nak_to_yoni[girl['nakshatra']]]
@@ -208,97 +232,82 @@ class VedicMatchEngine:
         g_papa = self.calculate_papa_points(girl)
         return total, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, scores['Maitri'], scores['Nadi']
 
-# --- 2. AI GENERATOR (GEMINI + IMAGES) ---
-def generate_ai_insights(api_key, match_data, b_img_file=None, g_img_file=None):
+# --- 3. AI INSIGHT ENGINE (Palmistry Extraction) ---
+def generate_reality_check(api_key, match_data, b_img_file=None, g_img_file=None):
     """
-    Uses Gemini Vision (1.5 Flash) to analyze Text + Images (Palms).
+    1. Extracts Palm Traits from Images (if available).
+    2. Combines with Astro data.
+    3. Generates 2 Strengths, 1 Watchout, 1 Icebreaker.
     """
     if not api_key:
-        return generate_fallback_insights(match_data)
+        return fallback_reality_check(match_data)
 
     try:
         genai.configure(api_key=api_key)
-        # 1.5 Flash is best for Multimodal (Images + Text) and Speed
         model = genai.GenerativeModel('gemini-1.5-flash')
 
-        # Prepare inputs
-        inputs = []
-
-        # Prompt
+        # Prepare Prompt
         prompt = f"""
-        Act as a modern, witty Gen Z dating coach. Analyze this couple:
+        Act as a modern relationship analyst for 'Yugma'.
 
-        Boy: {match_data['b_name']} ({', '.join(match_data['b_traits'])}) Likes: {', '.join(match_data['b_int'])}
-        Girl: {match_data['g_name']} ({', '.join(match_data['g_traits'])}) Likes: {', '.join(match_data['g_int'])}
+        **Astro Data:**
+        - Boy: {match_data['b_name']} (Interests: {', '.join(match_data['b_int'])})
+        - Girl: {match_data['g_name']} (Interests: {', '.join(match_data['g_int'])})
+        - Vedic Compatibility: {match_data['score']}/36
+        - Red Flags: {match_data['flag_txt']}
+        - Drama Level: {match_data['drama_txt']}
 
-        Compatibility Score: {match_data['score']}/36
-        Red Flags: {match_data['flag_txt']}
-        Drama Level: {match_data['drama_txt']}
+        **Instructions:**
+        1. If palm images are provided below, ANALYZE THEM FIRST. Look for:
+           - Heart Line (Curved=Emotional vs Straight=Logical)
+           - Head Line (Long=Deep Thinker vs Short=Practical)
+           - Hand Shape (Square=Earth/Stable vs Rectangular=Fire/Energetic)
+        2. If no images, rely on Astro/Interests.
 
-        I have attached photos of their palms. LOOK at the images if provided.
-        - Check Heart Line (Top horizontal line): Curved = Emotional, Straight = Logical.
-        - Check Head Line (Middle line): Long = Thinker, Short = Doer.
-
-        Task: Write 3 short, punchy lines about their relationship vibe, combining the Palm Analysis with the Astrology Data.
-        Rules:
-        1. NO ASTROLOGY JARGON. Use slang (e.g., 'green flags', 'chaos', 'vibe check').
-        2. Format exactly like this:
-        Title 1: [Text]
-        Title 2: [Text]
-        Title 3: [Text]
+        **Output Format (Strictly 4 lines):**
+        STRENGTH_1: [Deep insight based on Astro + Palm synergy]
+        STRENGTH_2: [Another strong point]
+        WATCHOUT: [A realistic friction point based on Red Flags or Palm clash]
+        ICEBREAKER: [A fun question based on their interests]
         """
-        inputs.append(prompt)
 
-        # Add Images if they exist
+        inputs = [prompt]
         if b_img_file:
-            b_image = Image.open(b_img_file)
-            inputs.append(b_image)
-            inputs.append("This is the Boy's Palm.")
-
+            inputs.append(Image.open(b_img_file))
+            inputs.append("Image: Boy's Palm")
         if g_img_file:
-            g_image = Image.open(g_img_file)
-            inputs.append(g_image)
-            inputs.append("This is the Girl's Palm.")
+            inputs.append(Image.open(g_img_file))
+            inputs.append("Image: Girl's Palm")
 
-        # Call Gemini
         response = model.generate_content(inputs)
         text = response.text
 
-        lines = [line for line in text.split('\n') if line.strip()][:3]
-        if len(lines) < 3: return generate_fallback_insights(match_data)
+        # Parse lines
+        lines = [line.split(':', 1)[1].strip() for line in text.split('\n') if ':' in line]
 
-        final_lines = [
-            f"<span class='insight-emoji'>🔥</span> {lines[0]}",
-            f"<span class='insight-emoji'>✨</span> {lines[1]}",
-            f"<span class='insight-emoji'>👀</span> {lines[2]}"
-        ]
-        return final_lines
+        if len(lines) < 4: return fallback_reality_check(match_data)
+        return lines
 
     except Exception as e:
-        # st.error(f"AI Error: {e}") # Uncomment for debugging
-        return generate_fallback_insights(match_data)
+        return fallback_reality_check(match_data)
 
-def generate_fallback_insights(data):
-    score = data['score']
-    lines = []
+def fallback_reality_check(data):
+    strengths = []
+    watchouts = []
 
-    if score >= 28: lines.append("<span class='insight-emoji'>🔥</span> <b>Insane Chemistry:</b> Rare and magnetic energy.")
-    elif score >= 18: lines.append("<span class='insight-emoji'>✨</span> <b>Solid Potential:</b> Great foundation, keep it real.")
-    else: lines.append("<span class='insight-emoji'>🎢</span> <b>Wild Card:</b> Bumpy ride, but maybe you like the challenge?")
+    if data['score'] >= 20: strengths.append("Strong astrological foundation.")
+    else: strengths.append("Challenging but exciting dynamic.")
 
-    if "Fire Hand (High Energy)" in data['b_traits'] or "Fire Hand (High Energy)" in data['g_traits']:
-         lines.append("<span class='insight-emoji'>⚡</span> <b>High Octane:</b> Never bored, just don't burn out.")
-    else:
-         lines.append("<span class='insight-emoji'>🧠</span> <b>Mental Match:</b> Top-tier conversations.")
+    strengths.append(f"Shared interest in {data['b_int'][0] if data['b_int'] else 'growth'}.")
 
-    if data['flag_txt'] != "Clean":
-        lines.append("<span class='insight-emoji'>🚩</span> <b>Intensity Alert:</b> Give each other space.")
-    else:
-        lines.append("<span class='insight-emoji'>✅</span> <b>Green Flags:</b> Smooth sailing ahead.")
+    if data['flag_txt'] != "Clean": watchouts.append("Potential ego clashes detected.")
+    else: watchouts.append("Communication styles may differ.")
 
-    return lines
+    icebreaker = f"Ask them: 'What's your wildest story about {data['g_int'][0] if data['g_int'] else 'travel'}?'"
 
-# --- 3. UTILS ---
+    return [strengths[0], strengths[1], watchouts[0], icebreaker]
+
+# --- 4. UTILS ---
 @st.cache_data
 def get_coords(city_name):
     known_cities = { "adoor": (9.1529, 76.7356), "chennai": (13.0827, 80.2707), "delhi": (28.7041, 77.1025), "mumbai": (19.0760, 72.8777) }
@@ -310,165 +319,133 @@ def get_coords(city_name):
         return (loc.latitude, loc.longitude) if loc else (None, None)
     except: return None, None
 
-def reset_app():
-    st.session_state.step = 1
-    st.session_state.match_data = {}
-    st.session_state.b_img = None
-    st.session_state.g_img = None
+# --- 5. MAIN UI LOGIC ---
 
-# --- 4. UI FLOW ---
-st.title("AstroSwipe")
+# ----------------- MODE A: BROWSE -----------------
+if st.session_state.lane == "Browse":
+    st.markdown("<h2 style='text-align: center;'>Explore Vibes</h2>", unsafe_allow_html=True)
+    st.image("https://images.unsplash.com/photo-1517841905240-472988babdf9", use_column_width=True)
+    c1, c2 = st.columns(2)
+    c1.button("❌ Pass", use_container_width=True)
+    c2.button("💚 Like", use_container_width=True)
 
-min_date = datetime(1900, 1, 1)
-max_date = datetime(2100, 12, 31)
-palm_traits_list = ["Curved Heart Line (Emotional)", "Straight Heart Line (Logical)", "Fire Hand (High Energy)", "Earth Hand (Stable)", "Air Hand (Intellectual)"]
-interests_list = ["Travel & Adventure", "Gym & Fitness", "Art & Poetry", "Finance & Crypto", "Gaming", "Foodie", "Deep Talks"]
+# ----------------- MODE C: PARTNER -----------------
+elif st.session_state.lane == "Partner":
+    st.markdown("<h2 style='text-align: center;'>Family Mode</h2>", unsafe_allow_html=True)
+    st.info("🔒 Identity Verification Required for Yugma Partner.")
+    st.text_input("Enter Government ID")
+    st.button("Unlock Deep Compatibility")
 
-# --- STEP 1: INPUTS ---
-if st.session_state.step == 1:
-    st.caption("Enter details to find your cosmic match.")
+# ----------------- MODE B: CONNECT (Core) -----------------
+elif st.session_state.lane == "Connect":
 
-    with st.expander("Boy's Profile", expanded=True):
+    interests_list = ["Travel", "Gym", "Art", "Crypto", "Gaming", "Foodie", "Deep Talks", "Music", "Tech"]
+
+    # --- STEP 1: ATTRACTION (Input / Profile View) ---
+    if st.session_state.step == 1:
+        st.markdown("### 1. The Setup")
+
+        with st.expander("Your Profile (Him)", expanded=True):
+            c1, c2 = st.columns(2)
+            b_name = c1.text_input("Name", "X", key="b1")
+            b_date = c1.date_input("DOB", datetime(1959, 12, 24), key="b2")
+            b_time = c1.time_input("Time", datetime.strptime("06:34", "%H:%M").time(), key="b3")
+            b_place = c1.text_input("City", "Adoor, India", key="b4")
+            # CHANGED: No more manual traits. Only Image.
+            b_img_up = c2.file_uploader("Palm Photo (Auto-Read)", type=['png', 'jpg'], key="b_img")
+            b_int = c2.multiselect("Interests", interests_list, default=[interests_list[0]], key="b_i")
+
+        with st.expander("Potential Match (Her)", expanded=True):
+            c1, c2 = st.columns(2)
+            g_name = c1.text_input("Name", "Y", key="g1")
+            g_date = c1.date_input("DOB", datetime(1963, 2, 17), key="g2")
+            g_time = c1.time_input("Time", datetime.strptime("09:04", "%H:%M").time(), key="g3")
+            g_place = c1.text_input("City", "Chennai, India", key="g4")
+            # CHANGED: No more manual traits. Only Image.
+            g_img_up = c2.file_uploader("Palm Photo (Auto-Read)", type=['png', 'jpg'], key="g_img")
+            g_int = c2.multiselect("Interests", interests_list, default=[interests_list[2]], key="g_i")
+
+        if st.button("💚 Interested? Swipe Right", type="primary", use_container_width=True):
+            with st.spinner("Calculating Yugma Score..."):
+                b_lat, b_lon = get_coords(b_place)
+                g_lat, g_lon = get_coords(g_place)
+
+                if not b_lat:
+                    st.error("Location Error")
+                    st.stop()
+
+                engine = VedicMatchEngine()
+                b_d = engine.get_planet_data(datetime.combine(b_date, b_time), b_lat, b_lon)
+                g_d = engine.get_planet_data(datetime.combine(g_date, g_time), g_lat, g_lon)
+
+                score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, maitri, nadi = engine.calculate_match(b_d, g_d)
+
+                manglik_ok = (b_mang == g_mang) or (b_mang <= 1 and g_mang <= 1)
+                sarpa_ok = (b_sarpa == g_sarpa) or (b_sarpa <= 1 and g_sarpa <= 1)
+                if score >= 20:
+                    if not sarpa_ok: sarpa_ok = True
+                    if not manglik_ok and (b_mang <= 1 or g_mang <= 1): manglik_ok = True
+
+                flag_txt = "Clean" if (manglik_ok and sarpa_ok) else "Dosha Mismatch"
+                drama_txt = "High" if g_papa > (b_papa + 2) else "Low"
+
+                # Save State (Traits removed from dict as they are now extracted by AI later)
+                st.session_state.match_data = {
+                    "score": int(score),
+                    "flag_txt": flag_txt,
+                    "drama_txt": drama_txt,
+                    "b_int": b_int, "g_int": g_int,
+                    "b_name": b_name, "g_name": g_name
+                }
+                st.session_state.b_img = b_img_up
+                st.session_state.g_img = g_img_up
+                st.session_state.step = 2
+                st.rerun()
+
+    # --- STEP 2: THE REALITY CHECK (Flip Card) ---
+    elif st.session_state.step == 2:
+        data = st.session_state.match_data
+
+        with st.spinner("Yugma AI: Reading palms & aligning stars..."):
+            insights = generate_reality_check(api_key, data, st.session_state.b_img, st.session_state.g_img)
+
+        st.markdown("### 2. The Reality Check")
+        st.caption("We looked past the profile picture. Here is the truth.")
+
+        # The Card UI
+        st.markdown(f"""
+        <div class="reality-card">
+            <h2 style="text-align: center; margin:0; color: #e15f41;">{data['score']}/36</h2>
+            <p style="text-align: center; color: grey;">Yugma Compatibility</p>
+            <hr style="border-top: 1px dashed #f3a683;">
+            <p><span class="strength-tag">STRENGTH:</span> {insights[0]}</p>
+            <p><span class="strength-tag">STRENGTH:</span> {insights[1]}</p>
+            <p><span class="watchout-tag">WATCH OUT:</span> {insights[2]}</p>
+            <hr style="border-top: 1px dashed #f3a683;">
+            <p style="text-align: center;"><b>💡 Icebreaker</b><br><i>"{insights[3]}"</i></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Step 2 Action: Confirm Intent
         c1, c2 = st.columns(2)
-        b_name = c1.text_input("Name", "X", key="b1")
-        b_date = c1.date_input("DOB", datetime(1959, 12, 24), min_value=min_date, max_value=max_date, key="b2")
-        b_time = c1.time_input("Time", datetime.strptime("06:34", "%H:%M").time(), key="b3")
-        b_place = c1.text_input("City", "Adoor, India", key="b4")
-
-        # New: File Uploader
-        b_img_up = c2.file_uploader("Upload Palm (Boy)", type=['png', 'jpg', 'jpeg'], key="b_img_up")
-        b_traits = c2.multiselect("Palm Traits (Manual)", palm_traits_list, default=[palm_traits_list[1]], key="b_traits")
-        b_int = c2.multiselect("Interests", interests_list, default=[interests_list[3]], key="b_int")
-
-    with st.expander("Girl's Profile", expanded=True):
-        c1, c2 = st.columns(2)
-        g_name = c1.text_input("Name", "Y", key="g1")
-        g_date = c1.date_input("DOB", datetime(1963, 2, 17), min_value=min_date, max_value=max_date, key="g2")
-        g_time = c1.time_input("Time", datetime.strptime("09:04", "%H:%M").time(), key="g3")
-        g_place = c1.text_input("City", "Chennai, India", key="g4")
-
-        # New: File Uploader
-        g_img_up = c2.file_uploader("Upload Palm (Girl)", type=['png', 'jpg', 'jpeg'], key="g_img_up")
-        g_traits = c2.multiselect("Palm Traits (Manual)", palm_traits_list, default=[palm_traits_list[0]], key="g_traits")
-        g_int = c2.multiselect("Interests", interests_list, default=[interests_list[2]], key="g_int")
-
-    if st.button("Check Compatibility", type="primary"):
-        with st.spinner("Aligning Stars..."):
-            b_lat, b_lon = get_coords(b_place)
-            g_lat, g_lon = get_coords(g_place)
-
-            if not b_lat:
-                st.error("Location Error")
-                st.stop()
-
-            engine = VedicMatchEngine()
-            b_d = engine.get_planet_data(datetime.combine(b_date, b_time), b_lat, b_lon)
-            g_d = engine.get_planet_data(datetime.combine(g_date, g_time), g_lat, g_lon)
-
-            score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, maitri, nadi = engine.calculate_match(b_d, g_d)
-
-            manglik_ok = (b_mang == g_mang) or (b_mang <= 1 and g_mang <= 1)
-            sarpa_ok = (b_sarpa == g_sarpa) or (b_sarpa <= 1 and g_sarpa <= 1)
-            if score >= 20:
-                if not sarpa_ok: sarpa_ok = True
-                if not manglik_ok and (b_mang <= 1 or g_mang <= 1): manglik_ok = True
-
-            flag_txt = "Clean" if (manglik_ok and sarpa_ok) else "Dosha Mismatch"
-            drama_txt = "High" if g_papa > (b_papa + 2) else "Low"
-
-            # Save Data & Images to Session State
-            st.session_state.match_data = {
-                "score": int(score),
-                "flag_txt": flag_txt,
-                "drama_txt": drama_txt,
-                "manglik_ok": manglik_ok,
-                "b_traits": b_traits,
-                "g_traits": g_traits,
-                "b_int": b_int,
-                "g_int": g_int,
-                "b_name": b_name,
-                "g_name": g_name
-            }
-            # Save images explicitly
-            st.session_state.b_img = b_img_up
-            st.session_state.g_img = g_img_up
-
-            st.session_state.step = 2
+        if c1.button("🏃 Run Away (Swipe Left)"):
+            st.session_state.step = 1
             st.rerun()
 
-# --- STEP 2: ASTRO CARD + FIRST SWIPE ---
-elif st.session_state.step == 2:
-    data = st.session_state.match_data
+        if c2.button("🔥 Confirm Connection (Swipe Right)"):
+            st.session_state.step = 3
+            st.rerun()
 
-    if data['score'] >= 18 and data['flag_txt'] == "Clean":
-        verdict = "IT'S A MATCH!"
-        cls = "match"
-    elif data['score'] >= 18:
-        verdict = "IT'S COMPLICATED"
-        cls = "complicated"
-    else:
-        verdict = "NO MATCH"
-        cls = "no-match"
-
-    st.markdown(f"""
-    <div class="profile-card">
-        <h1 class="{cls}">{verdict}</h1>
-        <h2 style="font-size: 40px; margin: 0;">{data['score']}/36</h2>
-        <p style="font-size: 12px; color: #b2bec3;">COMPATIBILITY SCORE</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    c1.metric("Red Flags", data['flag_txt'])
-    c2.metric("Drama Level", data['drama_txt'])
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    col1, col2 = st.columns(2)
-    if col1.button("❌ Swipe Left"):
-        st.error("Not a match. Moving on...")
-        time.sleep(1.5)
-        reset_app()
-        st.rerun()
-
-    if col2.button("💚 Swipe Right"):
-        st.session_state.step = 3
-        st.rerun()
-
-# --- STEP 3: THE MODERN INSIGHT POP-UP ---
-elif st.session_state.step == 3:
-    data = st.session_state.match_data
-
-    # Generate Insight with Images
-    with st.spinner("Analyzing Palms & Vibes..."):
-        insights = generate_ai_insights(
-            api_key,
-            data,
-            st.session_state.b_img,
-            st.session_state.g_img
-        )
-
-    st.markdown("### 🔮 The Vibe Check")
-    st.caption(f"Here's the honest breakdown for {data['b_name']} & {data['g_name']}")
-
-    st.markdown(f"""
-    <div class="insight-box">
-        <div class="insight-line">{insights[0]}</div>
-        <div class="insight-line">{insights[1]}</div>
-        <div class="insight-line" style="font-weight: 500;">{insights[2]}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.info("Based on this, do you want to connect?")
-
-    c1, c2 = st.columns(2)
-    if c1.button("Nah, cancel"):
-        reset_app()
-        st.rerun()
-
-    if c2.button("🚀 Send Request", type="primary"):
+    # --- STEP 3: INTENT CONFIRMATION ---
+    elif st.session_state.step == 3:
         st.balloons()
-        st.success(f"Request Sent to {data['g_name']}! Fingers crossed 💌")
-        if st.button("Check Another Couple"):
-            reset_app()
+        st.markdown(f"""
+        <div style="text-align: center; padding: 40px;">
+            <h1 style="color: #e15f41;">It's a Request! 💌</h1>
+            <p>You passed the Reality Check. We've sent your profile to <b>{st.session_state.match_data['g_name']}</b>.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if st.button("Browse More Profiles", use_container_width=True):
+            st.session_state.step = 1
             st.rerun()

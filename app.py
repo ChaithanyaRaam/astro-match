@@ -30,6 +30,8 @@ st.set_page_config(
 if 'step' not in st.session_state: st.session_state.step = 1
 if 'match_data' not in st.session_state: st.session_state.match_data = {}
 if 'lane' not in st.session_state: st.session_state.lane = "Connect"
+if 'b_img' not in st.session_state: st.session_state.b_img = None
+if 'g_img' not in st.session_state: st.session_state.g_img = None
 
 # --- CSS: YUGMA BRANDING ---
 st.markdown("""
@@ -76,16 +78,16 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- LOGO HEADER ---
-# Replace 'yugma_logo.png' with your actual filename if different
+# Ensure your logo file is named 'yugma_logo.png' and is in the same folder
 if os.path.exists("yugma_logo.png"):
     st.image("yugma_logo.png", width=200)
 else:
-    st.markdown("<h1>Yugma</h1>", unsafe_allow_html=True) # Fallback text if image missing
+    st.markdown("<h1>Yugma</h1>", unsafe_allow_html=True)
 
 # --- SIDEBAR (Settings) ---
 with st.sidebar:
     st.header("⚙️ Yugma Core")
-    api_key = st.text_input("Gemini API Key", type="password")
+    api_key = st.text_input("AIzaSyAKXWaBb98VofB6dPY3hn3LA3oOIRQwm80", type="password")
 
     st.divider()
     if st.button("Reset Experience"):
@@ -351,8 +353,8 @@ elif st.session_state.lane == "Connect":
             b_date = c1.date_input("DOB", datetime(1959, 12, 24), key="b2")
             b_time = c1.time_input("Time", datetime.strptime("06:34", "%H:%M").time(), key="b3")
             b_place = c1.text_input("City", "Adoor, India", key="b4")
-            # CHANGED: No more manual traits. Only Image.
-            b_img_up = c2.file_uploader("Palm Photo (Auto-Read)", type=['png', 'jpg'], key="b_img")
+            # FIXED: Renamed key to 'b_uploader' to prevent session state conflict
+            b_img_up = c2.file_uploader("Palm Photo (Auto-Read)", type=['png', 'jpg'], key="b_uploader")
             b_int = c2.multiselect("Interests", interests_list, default=[interests_list[0]], key="b_i")
 
         with st.expander("Potential Match (Her)", expanded=True):
@@ -361,8 +363,8 @@ elif st.session_state.lane == "Connect":
             g_date = c1.date_input("DOB", datetime(1963, 2, 17), key="g2")
             g_time = c1.time_input("Time", datetime.strptime("09:04", "%H:%M").time(), key="g3")
             g_place = c1.text_input("City", "Chennai, India", key="g4")
-            # CHANGED: No more manual traits. Only Image.
-            g_img_up = c2.file_uploader("Palm Photo (Auto-Read)", type=['png', 'jpg'], key="g_img")
+            # FIXED: Renamed key to 'g_uploader' to prevent session state conflict
+            g_img_up = c2.file_uploader("Palm Photo (Auto-Read)", type=['png', 'jpg'], key="g_uploader")
             g_int = c2.multiselect("Interests", interests_list, default=[interests_list[2]], key="g_i")
 
         if st.button("💚 Interested? Swipe Right", type="primary", use_container_width=True):
@@ -389,7 +391,7 @@ elif st.session_state.lane == "Connect":
                 flag_txt = "Clean" if (manglik_ok and sarpa_ok) else "Dosha Mismatch"
                 drama_txt = "High" if g_papa > (b_papa + 2) else "Low"
 
-                # Save State (Traits removed from dict as they are now extracted by AI later)
+                # Save State (Traits removed as they are extracted by AI later)
                 st.session_state.match_data = {
                     "score": int(score),
                     "flag_txt": flag_txt,
@@ -397,6 +399,7 @@ elif st.session_state.lane == "Connect":
                     "b_int": b_int, "g_int": g_int,
                     "b_name": b_name, "g_name": g_name
                 }
+                # Manually saving the file object to session state
                 st.session_state.b_img = b_img_up
                 st.session_state.g_img = g_img_up
                 st.session_state.step = 2

@@ -14,11 +14,12 @@ from datetime import datetime
 from timezonefinder import TimezoneFinder
 import pytz
 import time
-import google.generativeai as genai # NEW: Import Google AI
+import google.generativeai as genai
+from PIL import Image # NEW: For handling images
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Yugma-Together & Forever starts here",
+    page_title="AstroSwipe",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
@@ -79,9 +80,9 @@ st.markdown("""
 # --- SIDEBAR FOR API KEY ---
 with st.sidebar:
     st.header("⚙️ Engine Room")
-    api_key = st.text_input("AIzaSyAKXWaBb98VofB6dPY3hn3LA3oOIRQwm80", type="password", help="Get free key from Google AI Studio")
+    api_key = st.text_input("AIzaSyAKXWaBb98VofB6dPY3hn3LA3oOIRQwm80", type="password")
 
-# --- 1. CORE ENGINE ---
+# --- 1. CORE ASTRO ENGINE ---
 class VedicMatchEngine:
     def __init__(self):
         swe.set_ephe_path('')
@@ -207,19 +208,23 @@ class VedicMatchEngine:
         g_papa = self.calculate_papa_points(girl)
         return total, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, scores['Maitri'], scores['Nadi']
 
-# --- 2. AI GENERATOR (GEMINI) ---
-def generate_ai_insights(api_key, match_data):
+# --- 2. AI GENERATOR (GEMINI + IMAGES) ---
+def generate_ai_insights(api_key, match_data, b_img_file=None, g_img_file=None):
     """
-    Uses Google Gemini to generate modern, Gen Z insights.
-    Fallback to hardcoded if no API key is provided.
+    Uses Gemini Vision (1.5 Flash) to analyze Text + Images (Palms).
     """
     if not api_key:
-        return generate_fallback_insights(match_data) # Use old logic if no key
+        return generate_fallback_insights(match_data)
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-pro')
+        # 1.5 Flash is best for Multimodal (Images + Text) and Speed
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
+        # Prepare inputs
+        inputs = []
+
+        # Prompt
         prompt = f"""
         Act as a modern, witty Gen Z dating coach. Analyze this couple:
 
@@ -230,27 +235,38 @@ def generate_ai_insights(api_key, match_data):
         Red Flags: {match_data['flag_txt']}
         Drama Level: {match_data['drama_txt']}
 
-        Task: Write 3 short, punchy lines about their relationship vibe.
+        I have attached photos of their palms. LOOK at the images if provided.
+        - Check Heart Line (Top horizontal line): Curved = Emotional, Straight = Logical.
+        - Check Head Line (Middle line): Long = Thinker, Short = Doer.
+
+        Task: Write 3 short, punchy lines about their relationship vibe, combining the Palm Analysis with the Astrology Data.
         Rules:
-        1. NO ASTROLOGY JARGON (No 'dosha', 'mars', 'planets').
-        2. Use modern slang (e.g., 'green flags', 'chaos', 'vibe check', 'power couple').
-        3. Be specific to their interests/traits if possible.
-        4. Format exactly like this:
+        1. NO ASTROLOGY JARGON. Use slang (e.g., 'green flags', 'chaos', 'vibe check').
+        2. Format exactly like this:
         Title 1: [Text]
         Title 2: [Text]
         Title 3: [Text]
         """
+        inputs.append(prompt)
 
-        response = model.generate_content(prompt)
+        # Add Images if they exist
+        if b_img_file:
+            b_image = Image.open(b_img_file)
+            inputs.append(b_image)
+            inputs.append("This is the Boy's Palm.")
+
+        if g_img_file:
+            g_image = Image.open(g_img_file)
+            inputs.append(g_image)
+            inputs.append("This is the Girl's Palm.")
+
+        # Call Gemini
+        response = model.generate_content(inputs)
         text = response.text
 
-        # Simple parsing (splitting by newlines and cleaning)
         lines = [line for line in text.split('\n') if line.strip()][:3]
-
-        # Fallback if AI formatting is weird
         if len(lines) < 3: return generate_fallback_insights(match_data)
 
-        # Add Emojis manually to ensure UI consistency if AI forgets
         final_lines = [
             f"<span class='insight-emoji'>🔥</span> {lines[0]}",
             f"<span class='insight-emoji'>✨</span> {lines[1]}",
@@ -259,31 +275,24 @@ def generate_ai_insights(api_key, match_data):
         return final_lines
 
     except Exception as e:
+        # st.error(f"AI Error: {e}") # Uncomment for debugging
         return generate_fallback_insights(match_data)
 
 def generate_fallback_insights(data):
-    # This is the "Hardcoded" version you liked, used as backup
     score = data['score']
     lines = []
 
-    # LINE 1
     if score >= 28: lines.append("<span class='insight-emoji'>🔥</span> <b>Insane Chemistry:</b> Rare and magnetic energy.")
     elif score >= 18: lines.append("<span class='insight-emoji'>✨</span> <b>Solid Potential:</b> Great foundation, keep it real.")
     else: lines.append("<span class='insight-emoji'>🎢</span> <b>Wild Card:</b> Bumpy ride, but maybe you like the challenge?")
 
-    # LINE 2
     if "Fire Hand (High Energy)" in data['b_traits'] or "Fire Hand (High Energy)" in data['g_traits']:
          lines.append("<span class='insight-emoji'>⚡</span> <b>High Octane:</b> Never bored, just don't burn out.")
-    elif "Earth Hand (Stable)" in data['b_traits']:
-         lines.append("<span class='insight-emoji'>🌿</span> <b>Power Couple:</b> Focused and grounded.")
     else:
          lines.append("<span class='insight-emoji'>🧠</span> <b>Mental Match:</b> Top-tier conversations.")
 
-    # LINE 3
     if data['flag_txt'] != "Clean":
-        lines.append("<span class='insight-emoji'>🚩</span> <b>Intensity Alert:</b> Give each other space or you'll clash.")
-    elif data['drama_txt'] == "High":
-        lines.append("<span class='insight-emoji'>👜</span> <b>Baggage Check:</b> Be patient with each other.")
+        lines.append("<span class='insight-emoji'>🚩</span> <b>Intensity Alert:</b> Give each other space.")
     else:
         lines.append("<span class='insight-emoji'>✅</span> <b>Green Flags:</b> Smooth sailing ahead.")
 
@@ -304,6 +313,8 @@ def get_coords(city_name):
 def reset_app():
     st.session_state.step = 1
     st.session_state.match_data = {}
+    st.session_state.b_img = None
+    st.session_state.g_img = None
 
 # --- 4. UI FLOW ---
 st.title("AstroSwipe")
@@ -323,7 +334,10 @@ if st.session_state.step == 1:
         b_date = c1.date_input("DOB", datetime(1959, 12, 24), min_value=min_date, max_value=max_date, key="b2")
         b_time = c1.time_input("Time", datetime.strptime("06:34", "%H:%M").time(), key="b3")
         b_place = c1.text_input("City", "Adoor, India", key="b4")
-        b_traits = c2.multiselect("Palm Traits", palm_traits_list, default=[palm_traits_list[1]], key="b_traits")
+
+        # New: File Uploader
+        b_img_up = c2.file_uploader("Upload Palm (Boy)", type=['png', 'jpg', 'jpeg'], key="b_img_up")
+        b_traits = c2.multiselect("Palm Traits (Manual)", palm_traits_list, default=[palm_traits_list[1]], key="b_traits")
         b_int = c2.multiselect("Interests", interests_list, default=[interests_list[3]], key="b_int")
 
     with st.expander("Girl's Profile", expanded=True):
@@ -332,11 +346,14 @@ if st.session_state.step == 1:
         g_date = c1.date_input("DOB", datetime(1963, 2, 17), min_value=min_date, max_value=max_date, key="g2")
         g_time = c1.time_input("Time", datetime.strptime("09:04", "%H:%M").time(), key="g3")
         g_place = c1.text_input("City", "Chennai, India", key="g4")
-        g_traits = c2.multiselect("Palm Traits", palm_traits_list, default=[palm_traits_list[0]], key="g_traits")
+
+        # New: File Uploader
+        g_img_up = c2.file_uploader("Upload Palm (Girl)", type=['png', 'jpg', 'jpeg'], key="g_img_up")
+        g_traits = c2.multiselect("Palm Traits (Manual)", palm_traits_list, default=[palm_traits_list[0]], key="g_traits")
         g_int = c2.multiselect("Interests", interests_list, default=[interests_list[2]], key="g_int")
 
     if st.button("Check Compatibility", type="primary"):
-        with st.spinner("Analyzing Vibes..."):
+        with st.spinner("Aligning Stars..."):
             b_lat, b_lon = get_coords(b_place)
             g_lat, g_lon = get_coords(g_place)
 
@@ -348,10 +365,8 @@ if st.session_state.step == 1:
             b_d = engine.get_planet_data(datetime.combine(b_date, b_time), b_lat, b_lon)
             g_d = engine.get_planet_data(datetime.combine(g_date, g_time), g_lat, g_lon)
 
-            # CALCULATION
             score, b_mang, g_mang, b_sarpa, g_sarpa, b_papa, g_papa, maitri, nadi = engine.calculate_match(b_d, g_d)
 
-            # LOGIC
             manglik_ok = (b_mang == g_mang) or (b_mang <= 1 and g_mang <= 1)
             sarpa_ok = (b_sarpa == g_sarpa) or (b_sarpa <= 1 and g_sarpa <= 1)
             if score >= 20:
@@ -361,7 +376,7 @@ if st.session_state.step == 1:
             flag_txt = "Clean" if (manglik_ok and sarpa_ok) else "Dosha Mismatch"
             drama_txt = "High" if g_papa > (b_papa + 2) else "Low"
 
-            # Save to Session State
+            # Save Data & Images to Session State
             st.session_state.match_data = {
                 "score": int(score),
                 "flag_txt": flag_txt,
@@ -374,6 +389,10 @@ if st.session_state.step == 1:
                 "b_name": b_name,
                 "g_name": g_name
             }
+            # Save images explicitly
+            st.session_state.b_img = b_img_up
+            st.session_state.g_img = g_img_up
+
             st.session_state.step = 2
             st.rerun()
 
@@ -381,7 +400,6 @@ if st.session_state.step == 1:
 elif st.session_state.step == 2:
     data = st.session_state.match_data
 
-    # Verdict Logic
     if data['score'] >= 18 and data['flag_txt'] == "Clean":
         verdict = "IT'S A MATCH!"
         cls = "match"
@@ -392,7 +410,6 @@ elif st.session_state.step == 2:
         verdict = "NO MATCH"
         cls = "no-match"
 
-    # Render Card
     st.markdown(f"""
     <div class="profile-card">
         <h1 class="{cls}">{verdict}</h1>
@@ -422,14 +439,18 @@ elif st.session_state.step == 2:
 elif st.session_state.step == 3:
     data = st.session_state.match_data
 
-    # Generate Insight (Uses AI if API Key present, else Fallback)
-    with st.spinner("Generating Vibe Check..."):
-        insights = generate_ai_insights(api_key, data)
+    # Generate Insight with Images
+    with st.spinner("Analyzing Palms & Vibes..."):
+        insights = generate_ai_insights(
+            api_key,
+            data,
+            st.session_state.b_img,
+            st.session_state.g_img
+        )
 
     st.markdown("### 🔮 The Vibe Check")
     st.caption(f"Here's the honest breakdown for {data['b_name']} & {data['g_name']}")
 
-    # The Pop-up Box
     st.markdown(f"""
     <div class="insight-box">
         <div class="insight-line">{insights[0]}</div>

@@ -140,9 +140,11 @@ class VedicMatchEngine:
         flag = "Clean" if (b_mang == g_mang) else "Manglik Clash"
         return int(total), flag, nadi_score, maitri
 
-# --- AI HELPERS ---
+# --- AI HELPERS (DEBUG MODE ENABLED) ---
 def rewrite_bio_with_ai(api_key, bio, dob, time_birth, place):
-    if not api_key: return "⚠️ Please enter API Key in sidebar first."
+    # Debug: Check if key exists
+    if not api_key: return "DEBUG ERROR: Key is empty. Did you press ENTER after pasting?"
+
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -152,20 +154,11 @@ def rewrite_bio_with_ai(api_key, bio, dob, time_birth, place):
         Make it sound like a cool, authentic Gen Z dating app bio. Max 3 sentences.
         """
         return model.generate_content(prompt).text
-    except: return "⚠️ AI Error. Check API Key."
+    except Exception as e:
+        return f"REAL ERROR DETAILS: {str(e)}"
 
 def generate_viral_scorecard(api_key, b_name, g_name, score, flag):
-    """
-    Generates a shareable 'Scorecard' instead of a boring summary.
-    """
-    if not api_key:
-        return f"""
-        **VIRAL SCORECARD**
-        -------------------
-        🔥 **Vibe:** It's Complicated
-        🚩 **Red Flag:** {flag}
-        ☕ **The Tea:** Stars say maybe, reality says we'll see.
-        """
+    if not api_key: return "DEBUG ERROR: Key is empty. Press ENTER in sidebar."
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -174,14 +167,15 @@ def generate_viral_scorecard(api_key, b_name, g_name, score, flag):
         Data: Score {score}/36. Red Flag Status: {flag}.
 
         Format strictly like this (use emojis):
-        🔥 **The Vibe:** [2-3 word punchy description, e.g. "Chaos but Cute"]
-        ✅ **Green Flag:** [One specific strength based on high score or good luck]
-        🚩 **Red Flag:** [One roast-y warning based on the 'Red Flag' status]
-        ☕ **The Tea:** [One sentence predicting their future, use Gen Z slang]
+        🔥 **The Vibe:** [2-3 word punchy description]
+        ✅ **Green Flag:** [One specific strength]
+        🚩 **Red Flag:** [One roast-y warning]
+        ☕ **The Tea:** [One sentence prediction]
         🔮 **Final Rating:** {int(score/3.6)}/10
         """
         return model.generate_content(prompt).text
-    except: return "AI Unavailable."
+    except Exception as e:
+        return f"REAL ERROR DETAILS: {str(e)}"
 
 def create_dummy_profiles(gender, count=10):
     profiles = []
@@ -220,7 +214,7 @@ with st.sidebar:
         if st.button("Logout"): st.session_state.clear(); st.rerun()
 
 # ====================================================
-# VIEW 1: ONBOARDING (Updated with Palm & AI Rewrite)
+# VIEW 1: ONBOARDING
 # ====================================================
 if not st.session_state.user_profile:
     st.title("Welcome to Yugma")
@@ -240,8 +234,8 @@ if not st.session_state.user_profile:
         st.markdown("---")
         st.markdown("### 2. Photos & Identity")
         c5, c6 = st.columns(2)
-        # FIXED: Unique keys for onboarding uploaders
-        profile_pic = c5.file_uploader("Profile Photo", type=['jpg', 'png'], key="onboarding_profile_pic")
+        # FIXED: Unique keys to prevent StreamlitAPIException
+        profile_pic = c5.file_uploader("Profile Photo", type=['jpg', 'png'], key="onboarding_p_pic")
         palm_pic = c6.file_uploader("Your Palm (Right Hand)", type=['jpg', 'png'], key="onboarding_palm_pic", help="Required for Yugma Matching")
 
         st.markdown("---")
@@ -420,7 +414,6 @@ elif st.session_state.page == "Engine":
 
             score, flag, nadi, maitri = engine.calculate_match(u_d, t_d)
 
-            # FIXED: Avoid conflict by assigning to dummy variables or using them directly
             if api_key:
                 st.markdown(f"<div class='scorecard'>{generate_viral_scorecard(api_key, me['name'], t_name, score, flag)}</div>", unsafe_allow_html=True)
             else:

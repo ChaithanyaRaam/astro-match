@@ -31,7 +31,7 @@ st.set_page_config(
 # CONSTANTS / API KEYS
 # ---------------------------------------------------------
 
-MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdw3lc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
+MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdzNlc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
 GOOGLE_API_KEY = "AIzaSyAKXWaBb98VofB6dPY3hn3LA3oOIRQwm80" # <-- REPLACE WITH YOUR ACTUAL GEMINI API KEY
 
 # ---------------------------------------------------------

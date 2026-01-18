@@ -7,470 +7,544 @@ Original file is located at
     https://colab.research.google.com/drive/1pyvKmVGMTElSlb3eaxD-9j7DISurV1Qa
 """
 
-# =========================================================
-# YUGMA — DATING FIRST, MARRIAGE UPGRADE READY
-# =========================================================
-
 import streamlit as st
 import swisseph as swe
+
 from geopy.geocoders import MapBox
 from datetime import datetime, time as dt_time
+
 from timezonefinder import TimezoneFinder
 import pytz
 import random
-import google.generativeai as genai
 
+import google.generativeai as genai
 # ---------------------------------------------------------
-# CONFIG
+# PAGE CONFIG
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Yugma",
     page_icon="🧡",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="expanded"
 )
+# ---------------------------------------------------------
+# CONSTANTS / API KEYS
+# ---------------------------------------------------------
 
-MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdzNlc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
+MAPBOX_KEY = "pk.eyJ1IjoiY3JhYW0iLCJhIjoiY21qdmwycGtpMmJrdw3lc2RyeGh4NzI0ZCJ9.QDE8TkUAQFswm2XFBBxxaw"
+# ---------------------------------------------------------
+# SESSION STATE (GLOBAL — DO NOT MOVE)
+# ---------------------------------------------------------
+
+# Navigation
 
 # ---------------------------------------------------------
-# SESSION STATE
-# ---------------------------------------------------------
-defaults = {
-    "page": "Onboarding",
-    "user": None,
-    "profiles": [],
-    "ai_bio": ""
-}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-# ---------------------------------------------------------
-# SESSION STATE (GLOBAL – DO NOT MOVE)
+# SESSION STATE (GLOBAL)
 # ---------------------------------------------------------
 if "page" not in st.session_state:
     st.session_state.page = "Onboarding"
 
-if "user_profile" not in st.session_state:
-    st.session_state.user_profile = None
+if "user" not in st.session_state:
+    st.session_state.user = None
 
 if "profiles" not in st.session_state:
     st.session_state.profiles = []
 
-# ✅ THIS IS WHERE liked_profiles IS ADDED
 if "liked_profiles" not in st.session_state:
     st.session_state.liked_profiles = []
 
-if "generated_bio" not in st.session_state:
-    st.session_state.generated_bio = ""
+if "ai_bio" not in st.session_state:
+    st.session_state.ai_bio = ""
+
+if "shown_insights" not in st.session_state:
+    st.session_state.shown_insights = set()
 
 # ---------------------------------------------------------
-# STYLES
+# GLOBAL STYLES
 # ---------------------------------------------------------
 st.markdown("""
 <style>
-.stApp { background:#fffaf0; }
+.stApp {
+    background-color: #fffaf0;
+}
+
+/* Card container */
 .card {
-    background:white;
-    border-radius:14px;
-    padding:16px;
-    margin-bottom:18px;
-    box-shadow:0 4px 12px rgba(0,0,0,.06);
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 18px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
 }
+
+/* Badges (small insight pills) */
 .badge {
-    display:inline-block;
-    background:#ffeaa7;
-    color:#d35400;
-    padding:4px 8px;
-    border-radius:8px;
-    font-size:12px;
-    margin:2px;
+    display: inline-block;
+    background: #ffeaa7;
+    color: #d35400;
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    margin-right: 6px;
 }
-.scorecard {
-    border:2px dashed #e17055;
-    padding:16px;
-    border-radius:12px;
-    background:#fff;
-    font-family:monospace;
+
+/* AI score / couple summary */
+.viral-card {
+    border: 2px dashed #e17055;
+    padding: 14px;
+    border-radius: 12px;
+    background: #ffffff;
+    font-family: monospace;
 }
 </style>
 """, unsafe_allow_html=True)
-
 # ---------------------------------------------------------
-# LOCATION UTILS (MAPBOX – NO HARDCODE)
+# LOCATION UTILITIES (MAPBOX — NO HARDCODED LAT/LON)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def get_coords(city_name: str):
     if not city_name:
         return None, None
+
     try:
         geolocator = MapBox(
             api_key=MAPBOX_KEY,
             user_agent="yugma_dating_app_v1"
         )
         location = geolocator.geocode(city_name, timeout=10)
+
         if location:
             return location.latitude, location.longitude
-        return None, None
-    except:
+
         return None, None
 
+    except Exception:
+        return None, None
 # ---------------------------------------------------------
-# VEDIC MATCH ENGINE (UNCHANGED CORE LOGIC)
+# VEDIC MATCH ENGINE (CORE + DATING LAYER)
 # ---------------------------------------------------------
 class VedicMatchEngine:
     def __init__(self):
         swe.set_ephe_path('')
-        self.nak_to_nadi = [0,1,2,2,1,0,0,1,2,0,1,2,2,1,0,0,1,2,0,1,2,2,1,0,0,1,2]
-        self.nak_to_gana = [0,1,2,1,0,1,0,0,0,2,1,1,2,2,2,2,0,0,2,1,1,0,2,2,1,0,0]
+        swe.set_sid_mode(swe.SIDM_LAHIRI, 0, 0)
+
+        # --- Classical mappings ---
+        self.nak_to_nadi = [
+            0,1,2,2,1,0,0,1,2,
+            0,1,2,2,1,0,0,1,2,
+            0,1,2,2,1,0,0,1,2
+        ]
+
         self.rashi_lords = [2,5,3,1,0,3,5,2,4,6,6,4]
+
         self.maitri_matrix = [
-            [5,5,5,4,5,0,0],[5,5,4,1,4,0.5,0.5],[5,4,5,0.5,5,3,0.5],
-            [4,1,0.5,5,0.5,5,4],[5,4,5,0.5,5,0.5,3],[0,0.5,3,5,0.5,5,5],
+            [5,5,5,4,5,0,0],
+            [5,5,4,1,4,0.5,0.5],
+            [5,4,5,0.5,5,3,0.5],
+            [4,1,0.5,5,0.5,5,4],
+            [5,4,5,0.5,5,0.5,3],
+            [0,0.5,3,5,0.5,5,5],
             [0,0.5,0.5,4,3,5,5]
         ]
 
+    # -----------------------------------------------------
+    # PLANETARY DATA (AUTHORITATIVE)
+    # -----------------------------------------------------
     def get_planet_data(self, dt_obj, lat, lon):
         tf = TimezoneFinder()
         tz = tf.timezone_at(lat=lat, lng=lon) or "UTC"
-        local = pytz.timezone(tz).localize(dt_obj)
-        utc = local.astimezone(pytz.utc)
+        local_dt = pytz.timezone(tz).localize(dt_obj)
+        utc_dt = local_dt.astimezone(pytz.utc)
+
+        time_dec = (
+            utc_dt.hour +
+            utc_dt.minute / 60.0 +
+            utc_dt.second / 3600.0
+        )
 
         jd = swe.julday(
-            utc.year, utc.month, utc.day,
-            utc.hour + utc.minute / 60
+            utc_dt.year,
+            utc_dt.month,
+            utc_dt.day,
+            time_dec
         )
-        swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-        moon = swe.calc_ut(jd, swe.MOON, swe.FLG_SIDEREAL)[0][0]
-        mars = swe.calc_ut(jd, swe.MARS, swe.FLG_SIDEREAL)[0][0]
-
-        return {
-            "nakshatra": int(moon / 13.333333),
-            "rashi": int(moon / 30),
-            "mars_deg": mars
+        planets = {
+            "Moon": swe.calc_ut(jd, swe.MOON, swe.FLG_SIDEREAL)[0][0],
+            "Mars": swe.calc_ut(jd, swe.MARS, swe.FLG_SIDEREAL)[0][0],
+            "Rahu": swe.calc_ut(jd, swe.MEAN_NODE, swe.FLG_SIDEREAL)[0][0]
         }
 
-    def calculate_match(self, boy, girl):
-        # Dating-safe scoring
-        dist = abs(boy["nakshatra"] - girl["nakshatra"])
-        vibe = max(0, 100 - (dist * 3))
+        cusps, _ = swe.houses(jd, lat, lon, b'P')
+        asc_deg = cusps[0]
 
+        def get_rashi(deg):
+            return int(deg / 30)
+
+        def get_house(deg, asc):
+            return (int(deg / 30) - int(asc / 30) + 12) % 12 + 1
+
+        return {
+            "nakshatra": int(planets["Moon"] / 13.333333),
+            "rashi": get_rashi(planets["Moon"]),
+            "mars_deg": planets["Mars"],
+            "mars_house": get_house(planets["Mars"], asc_deg),
+            "rahu_house": get_house(planets["Rahu"], asc_deg)
+        }
+
+    # -----------------------------------------------------
+    # CLASSICAL MATCH SCORE (36 GUNA STYLE – SIMPLIFIED)
+    # -----------------------------------------------------
+    def calculate_match(self, b, g):
+        score = 0
+
+        # Nadi
+        nadi_same = self.nak_to_nadi[b["nakshatra"]] == self.nak_to_nadi[g["nakshatra"]]
+        nadi_score = 0 if nadi_same else 8
+        score += nadi_score
+
+        # Maitri
         maitri = (
-            self.maitri_matrix[self.rashi_lords[boy["rashi"]]][self.rashi_lords[girl["rashi"]]] +
-            self.maitri_matrix[self.rashi_lords[girl["rashi"]]][self.rashi_lords[boy["rashi"]]]
+            self.maitri_matrix[self.rashi_lords[b["rashi"]]][self.rashi_lords[g["rashi"]]] +
+            self.maitri_matrix[self.rashi_lords[g["rashi"]]][self.rashi_lords[b["rashi"]]]
         ) / 2
 
-        manglik_clash = abs(boy["mars_deg"] - girl["mars_deg"]) < 25
-        flag = "⚠️ Intensity Clash" if manglik_clash else "✅ Balanced"
+        score += maitri * 4
 
-        return int(vibe + maitri * 5), flag
+        total = min(36, score + 10)
 
+        # Manglik
+        mang_houses = [1,2,4,7,8,12]
+        b_mang = b["mars_house"] in mang_houses
+        g_mang = g["mars_house"] in mang_houses
+        flag = "Manglik Clash" if b_mang != g_mang else "Clean"
+
+        return int(total), flag, nadi_score, maitri
+
+    # -----------------------------------------------------
+    # DATING INSIGHTS (PRODUCT LAYER)
+    # -----------------------------------------------------
+    def get_dating_insights(self, boy, girl):
+        insights = {}
+
+        # Emotional sync (Moon distance)
+        nak_diff = abs(boy["nakshatra"] - girl["nakshatra"])
+        if nak_diff <= 3:
+            insights["emotional_sync"] = "Very emotionally aligned"
+        elif nak_diff <= 6:
+            insights["emotional_sync"] = "Emotionally compatible with adjustments"
+        else:
+            insights["emotional_sync"] = "Emotionally different but intriguing"
+
+        # Chemistry (Mars proximity)
+        mars_gap = abs(boy["mars_deg"] - girl["mars_deg"])
+        if mars_gap < 20:
+            insights["chemistry"] = "High intensity attraction"
+        elif mars_gap < 40:
+            insights["chemistry"] = "Balanced attraction"
+        else:
+            insights["chemistry"] = "Slow-burn connection"
+
+        # Long-term signal
+        score, flag, _, _ = self.calculate_match(boy, girl)
+        if score >= 28:
+            insights["long_term"] = "Strong long-term potential"
+        elif score >= 22:
+            insights["long_term"] = "Works with conscious communication"
+        else:
+            insights["long_term"] = "Fun but effort-heavy"
+
+        insights["raw_flag"] = flag
+        insights["score"] = score
+
+        return insights
 # ---------------------------------------------------------
-# AI HELPERS (GEMINI FREE TIER SAFE)
+# AI HELPERS — GEN Z TRANSLATION LAYER
 # ---------------------------------------------------------
-def ai_bio(api_key, text):
-    if not api_key:
-        return text
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = f"""
-Rewrite this dating bio in a cool Indian Gen Z tone.
-No astrology words. Max 3 lines.
+def ai_couple_summary(api_key, name1, name2, insights):
+    """
+    AI ONLY rephrases engine insights.
+    It does NOT invent or judge.
+    """
 
-Bio: {text}
-"""
-        return model.generate_content(prompt).text.strip()
-    except:
-        return text
-
-def ai_scorecard(api_key, a, b, score, flag):
+    # Fallback (no AI key)
     if not api_key:
         return f"""
-🔥 Vibe: Mixed
-🚩 Flag: {flag}
-☕ Tea: Depends on effort
-⭐ Rating: {score//10}/10
+🔥 Emotional vibe: {insights['emotional_sync']}
+💥 Chemistry: {insights['chemistry']}
+🧭 Where this could go: {insights['long_term']}
 """
+
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
+
         prompt = f"""
-Create a viral dating scorecard.
+You are rewriting relationship insights for a Gen Z dating app.
 
-Names: {a}, {b}
-Score: {score}/100
-Flag: {flag}
+STRICT RULES:
+- Do NOT invent information
+- Do NOT add astrology terms
+- Only rephrase what is given
+- Casual, modern, dating-app tone
+- Max 4 short lines
 
-Format:
-🔥 Vibe:
-✅ Strength:
-🚩 Warning:
-☕ Tea:
-⭐ Rating:
+COUPLE:
+{name1} & {name2}
+
+RAW INSIGHTS:
+- Emotional sync: {insights['emotional_sync']}
+- Chemistry: {insights['chemistry']}
+- Long-term direction: {insights['long_term']}
+
+OUTPUT FORMAT (exact):
+🔥 Emotional vibe:
+💥 Chemistry:
+🧭 Where this could go:
 """
-        return model.generate_content(prompt).text
-    except:
-        return "AI unavailable."
 
-# ---------------------------------------------------------
-# DUMMY PROFILES
-# ---------------------------------------------------------
-def generate_profiles(gender):
-    names = ["Aarav","Kabir","Rohan"] if gender=="Female" else ["Diya","Mira","Ananya"]
+        response = model.generate_content(
+            prompt,
+            generation_config={"temperature": 0.7}
+        )
+
+        return response.text.strip()
+
+    except Exception:
+        return "✨ Interesting connection with potential worth exploring."
+# =========================================================
+# DUMMY PROFILES GENERATION
+# =========================================================
+
+def generate_dummy_profiles(user_gender):
+    """
+    Temporary profiles for MVP testing.
+    Later this will be replaced by real users.
+    """
+    male_names = ["Aarav", "Kabir", "Rohan", "Ishaan"]
+    female_names = ["Diya", "Mira", "Ananya", "Sana"]
+
     img_m = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d"
     img_f = "https://images.unsplash.com/photo-1544005313-94ddf0286df2"
 
-    profiles=[]
-    for i in range(10):
+    # If user is Male, generate female profiles. If user is Female, generate male profiles.
+    names = female_names if user_gender == "Male" else male_names
+    img = img_f if user_gender == "Male" else img_m
+
+    profiles = []
+    for i in range(8):
         profiles.append({
-            "id":i,
-            "name":random.choice(names),
-            "age":random.randint(23,32),
-            "city":random.choice(["Chennai","Bangalore","Mumbai"]),
-            "img": img_m if gender=="Female" else img_f,
-            "dob": datetime(1994, random.randint(1,12), random.randint(1,28)),
-            "tob": dt_time(random.randint(0,23),0)
+            "id": i,
+            "name": random.choice(names),
+            "age": random.randint(23, 32),
+            "city": random.choice(["Chennai", "Bangalore", "Mumbai"]),
+            "img": img,
+            "dob": datetime(1995, random.randint(1, 12), random.randint(1, 28)),
+            "tob": dt_time(random.randint(0, 23), 0)
         })
     return profiles
 
 # =========================================================
-# ONBOARDING
+# PAGE ROUTER (SINGLE SOURCE OF TRUTH)
 # =========================================================
-if not st.session_state.user:
-    st.title("Welcome to Yugma 🧡")
 
-    name = st.text_input("Name")
-    gender = st.selectbox("Gender", ["Male","Female"])
-    dob = st.date_input("DOB", datetime(1996,1,1))
-    tob = st.time_input("Time of Birth", dt_time(12,0))
-    city = st.text_input("City")
-    bio = st.text_area("Your Bio")
+if st.session_state.user is None:
+    # ---------------- ONBOARDING ----------------
+    st.title("Welcome to Yugma 🧡")
+    st.caption("Dating, decoded through patterns — not guesswork.")
+
+    name = st.text_input("Your Name")
+    dob = st.date_input("Date of Birth", datetime(1996, 1, 1))
+    tob = st.time_input("Time of Birth", dt_time(12, 0))
+    city = st.text_input("City of Birth")
+    gender = st.radio("Your Gender", ["Male", "Female"]) # Added gender input
+
     api_key = st.text_input("Gemini API Key (optional)", type="password")
 
-    if st.button("✨ Rewrite Bio with AI"):
-        st.session_state.ai_bio = ai_bio(api_key, bio)
+    # --- Integrated AI Bio Generation and Regenerate ---
+    c1, c2 = st.columns([3, 1])
 
-    if st.session_state.ai_bio:
-        st.info(st.session_state.ai_bio)
+    # These variables are re-calculated within the button clicks, so no need for global scope here
 
-    if st.button("Start Journey 🚀"):
+    if c1.button("✨ Generate Bio with Yugma"):
         lat, lon = get_coords(city)
+
         if not lat:
             st.error("Please enter a valid city")
         else:
+            engine = VedicMatchEngine()
+
+            user_chart = engine.get_planet_data(
+                datetime.combine(dob, tob),
+                lat, lon
+            )
+
+            # Convert astro → personality signals
+            if user_chart["nakshatra"] <= 8:
+                moon_nature = "emotionally expressive and intuitive"
+            elif user_chart["nakshatra"] <= 17:
+                moon_nature = "calm, observant, and grounded"
+            else:
+                moon_nature = "thoughtful, reflective, and private"
+
+            if user_chart["mars_deg"] < 120:
+                mars_style = "direct, energetic, and decisive"
+            elif user_chart["mars_deg"] < 240:
+                mars_style = "balanced, patient, and steady"
+            else:
+                mars_style = "chill, adaptable, and low-drama"
+
+            astro_bio_prompt = f"""
+Create a dating app bio using personality signals.
+
+Signals:
+- Emotional nature: {moon_nature}
+- Action style: {mars_style}
+
+Rules:
+- Gen Z Indian tone
+- No astrology words
+- No emojis
+- Max 2 sentences
+"""
+
+            if api_key:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                res = model.generate_content(
+                    astro_bio_prompt,
+                    generation_config={"temperature": 0.85}
+                )
+                st.session_state.ai_bio = res.text.strip()
+            else:
+                st.session_state.ai_bio = (
+                    f"{moon_nature.capitalize()}. {mars_style.capitalize()}."
+                )
+
+    if c2.button("↻") and st.session_state.ai_bio:
+        # Recalculate signals for regeneration to ensure they're up-to-date with current inputs
+        lat, lon = get_coords(city)
+        if lat:
+            engine = VedicMatchEngine()
+            user_chart = engine.get_planet_data(datetime.combine(dob, tob), lat, lon)
+
+            if user_chart["nakshatra"] <= 8:
+                moon_nature_regen = "emotionally expressive and intuitive"
+            elif user_chart["nakshatra"] <= 17:
+                moon_nature_regen = "calm, observant, and grounded"
+            else:
+                moon_nature_regen = "thoughtful, reflective, and private"
+
+            if user_chart["mars_deg"] < 120:
+                mars_style_regen = "direct, energetic, and decisive"
+            elif user_chart["mars_deg"] < 240:
+                mars_style_regen = "balanced, patient, and steady"
+            else:
+                mars_style_regen = "chill, adaptable, and low-drama"
+
+            astro_bio_prompt_regen = f"""
+Create a dating app bio using personality signals.
+
+Signals:
+- Emotional nature: {moon_nature_regen}
+- Action style: {mars_style_regen}
+
+Rules:
+- Gen Z Indian tone
+- No astrology words
+- No emojis
+- Max 2 sentences
+"""
+            if api_key:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                res = model.generate_content(
+                    astro_bio_prompt_regen,
+                    generation_config={"temperature": 0.85, "candidate_count": 1}
+                )
+                st.session_state.ai_bio = res.text.strip()
+            else:
+                st.session_state.ai_bio = (
+                    f"{moon_nature_regen.capitalize()}. {mars_style_regen.capitalize()}."
+                )
+
+    if st.session_state.ai_bio:
+        st.markdown("#### Your Yugma Bio")
+        st.info(st.session_state.ai_bio)
+    # --- End Integrated AI Bio Generation ---
+
+    if st.button("Start Journey 🚀"):
+        lat, lon = get_coords(city)
+        if lat:
             st.session_state.user = {
                 "name": name,
-                "gender": gender,
                 "dob": dob,
                 "tob": tob,
                 "city": city,
                 "lat": lat,
                 "lon": lon,
-                "bio": st.session_state.ai_bio or bio,
-                "api": api_key
+                "api": api_key,
+                "gender": gender # Store gender
             }
-            st.session_state.profiles = generate_profiles(gender)
             st.session_state.page = "Modes"
-            st.experimental_rerun()
+            st.rerun()
 
-# =========================================================
-# MODE SELECTION
-# =========================================================
 elif st.session_state.page == "Modes":
-    st.title("Choose Path")
+    # ---------------- MODES ----------------
+    st.title("Choose Your Path")
 
-    # Navigation Cards
-    st.markdown("<div class='card'><h3>⚡ Swipeee</h3><p>Casual vibes. Just looks.</p></div>", unsafe_allow_html=True)
-    if st.button("Play Swipeee"): st.session_state.page = "Swipeee"; st.rerun()
+    st.markdown("<div class='card'><h3>⚡ Swipeee</h3><p>Casual vibes. Just swipe.</p></div>", unsafe_allow_html=True)
+    if st.button("Enter Swipeee"):
+        if not st.session_state.profiles:
+            # Use user's gender to generate dummy profiles of opposite sex
+            user_gender = st.session_state.user.get("gender", "Male") # Default to Male if not found
+            st.session_state.profiles = generate_dummy_profiles(user_gender)
+        st.session_state.page = "Swipeee"
+        st.rerun()
 
-    st.markdown("<div class='card'><h3>🔮 Yugma</h3><p>Astro-verified matches.</p></div>", unsafe_allow_html=True)
-    if st.button("Enter Yugma"): st.session_state.page = "Yugma"; st.rerun()
+    st.markdown("<div class='card'><h3>🔮 Yugma</h3><p>Astro-verified dating.</p></div>", unsafe_allow_html=True)
+    if st.button("Enter Yugma"):
+        st.session_state.page = "Yugma"
+        st.rerun()
 
-    st.markdown("<div class='card'><h3>💎 Yugma+</h3><p>Marriage & Lineage Reports.</p></div>", unsafe_allow_html=True)
-    if st.button("Unlock Plus"): st.session_state.page = "YugmaPlus"; st.rerun()
+    st.markdown("<div class='card'><h3>❤️ Matches</h3><p>People you liked.</p></div>", unsafe_allow_html=True)
+    if st.button("View Matches"):
+        st.session_state.page = "Matches"
+        st.rerun()
 
-    st.markdown("<div class='card'><h3>⚙️ Engine</h3><p>Manual Compatibility Check.</p></div>", unsafe_allow_html=True)
-    if st.button("Open Engine"): st.session_state.page = "Engine"; st.rerun()
+elif st.session_state.page == "Matches":
+    # ---------------- MATCHES ----------------
+    st.title("Your Matches ❤️")
+    st.caption("People you felt a spark with.")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("👤 View My Profile"): st.session_state.page = "My Profile"; st.rerun()
+    if not st.session_state.liked_profiles:
+        st.info("No matches yet. Start swiping 💚")
 
-# =========================================================
-# SWIPEEE
-# =========================================================
-elif st.session_state.page=="Swipeee":
-    st.title("Swipeee ⚡")
-    for p in st.session_state.profiles:
-        with st.container():
-            st.markdown("<div class='card'>",unsafe_allow_html=True)
-            st.image(p["img"],use_column_width=True)
-            st.subheader(f"{p['name']}, {p['age']}")
-            c1,c2=st.columns(2)
-            c1.button("❌", key=f"n{p['id']}")
-            c2.button("💚", key=f"y{p['id']}")
-            st.markdown("</div>",unsafe_allow_html=True)
-    st.button("← Back", on_click=lambda: st.session_state.update({"page":"Modes"}))
+    else:
+        for p in st.session_state.liked_profiles:
+            with st.container():
+                st.markdown("<div class='card'>", unsafe_allow_html=True)
 
-# =========================================================
-# YUGMA (SMART DATING)
-# =========================================================
-elif st.session_state.page=="Yugma":
-    st.title("Yugma 🔮")
-    engine = VedicMatchEngine()
-    u = st.session_state.user
+                st.image(p["img"])
+                st.subheader(f"{p['name']}, {p['age']}")
+                st.caption(f"📍 {p['city']}")
 
-    u_data = engine.get_planet_data(
-        datetime.combine(u["dob"],u["tob"]),
-        u["lat"], u["lon"]
-    )
-
-    for p in st.session_state.profiles:
-        plat, plon = get_coords(p["city"])
-        if not plat:
-            continue
-
-        p_data = engine.get_planet_data(
-            datetime.combine(p["dob"],p["tob"]),
-            plat, plon
-        )
-
-        score, flag = engine.calculate_match(u_data, p_data)
-
-        with st.container():
-            st.markdown("<div class='card'>",unsafe_allow_html=True)
-            st.image(p["img"],use_column_width=True)
-            st.subheader(f"{p['name']}, {p['age']}")
-            st.markdown(f"<span class='badge'>Vibe {score}%</span> <span class='badge'>{flag}</span>",unsafe_allow_html=True)
-
-            if st.button("✨ Analyze", key=f"a{p['id']}"):
-                card = ai_scorecard(u["api"], u["name"], p["name"], score, flag)
-                st.markdown(f"<div class='scorecard'>{card}</div>",unsafe_allow_html=True)
-            st.markdown("</div>",unsafe_allow_html=True)
-
-    st.button("← Back", on_click=lambda: st.session_state.update({"page":"Modes"}))
-
-# ====================================================
-# 12. VIEW: YUGMA+ & PROFILE
-# ====================================================
-elif st.session_state.page == "YugmaPlus":
-    st.title("Yugma +")
-    if st.button("← Back"): st.session_state.page = "Modes"; st.rerun()
-
-    st.markdown("""
-    <div class='card'>
-        <h3>💎 Premium Unlocked</h3>
-        <p><b>Detailed Lineage Check:</b><br>Analyze ancestral compatibility.</p>
-        <hr>
-        <p><b>Marriage Timing:</b><br>Know exactly when the stars align.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("<div class='card'><h3>₹299 / month</h3></div>", unsafe_allow_html=True)
-    if st.button("Subscribe Now"): st.balloons(); st.success("Welcome!")
-
-elif st.session_state.page == "My Profile":
-    st.title("My Profile")
-    if st.button("← Back"): st.session_state.page = "Modes"; st.rerun()
-    p = st.session_state.user_profile
-    st.markdown(f"""
-    <div class='card'>
-        <h3>{p['name']}</h3>
-        <p>📍 {p['pob']}</p>
-        <p>🎂 {p['dob'].strftime('%d %B %Y')}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    if st.button("Logout"): st.session_state.clear(); st.rerun()
-
-# =========================================================
-# PROFILE
-# =========================================================
-elif st.session_state.page=="Profile":
-    u = st.session_state.user
-    st.title("My Profile")
-    st.write(f"**Name:** {u['name']}")
-    st.write(f"**City:** {u['city']}")
-    st.write(f"**Bio:** {u['bio']}")
-    st.button("← Back", on_click=lambda: st.session_state.update({"page":"Modes"}))
-
-# =========================================================
-# MANUAL ENGINE
-# =========================================================
-elif st.session_state.page=="Engine":
-    st.title("Compatibility Engine 🧮")
-    engine = VedicMatchEngine()
-    me = st.session_state.user
-
-    name = st.text_input("Partner Name")
-    dob = st.date_input("Partner DOB")
-    tob = st.time_input("Partner Time", dt_time(12,0))
-    city = st.text_input("Partner City")
-
-    if st.button("Generate Score"):
-        lat, lon = get_coords(city)
-        if not lat:
-            st.error("Invalid city")
-        else:
-            me_data = engine.get_planet_data(
-                datetime.combine(me["dob"],me["tob"]),
-                me["lat"], me["lon"]
-            )
-            p_data = engine.get_planet_data(
-                datetime.combine(dob,tob),
-                lat, lon
-            )
-            score, flag = engine.calculate_match(me_data, p_data)
-            st.markdown(
-                f"<div class='scorecard'>{ai_scorecard(me['api'], me['name'], name, score, flag)}</div>",
-                unsafe_allow_html=True
-            )
-
-    st.button("← Back", on_click=lambda: st.session_state.update({"page":"Modes"}))
-
-
-# ====================================================
-# VIEW: YUGMA (MATCHES)
-# ====================================================
-elif st.session_state.page == "Yugma":
-    st.title("Your Matches")
+                st.markdown("</div>", unsafe_allow_html=True)
 
     if st.button("← Back"):
         st.session_state.page = "Modes"
         st.rerun()
-
-    matches = st.session_state.liked_profiles
-
-    if not matches:
-        st.info("You haven't liked anyone yet. Start swiping 💚")
-    else:
-        for idx, p in enumerate(matches):
-            with st.container():
-                st.markdown("<div class='card'>", unsafe_allow_html=True)
-
-                c1, c2 = st.columns([1, 2])
-
-                with c1:
-                    st.image(p["img"], use_column_width=True)
-
-                with c2:
-                    st.subheader(f"{p['name']}, {p['age']}")
-
-                    # Temporary score (replace with engine later)
-                    score = random.randint(18, 32)
-                    st.write(f"**Compatibility Score:** {score}/36")
-                    st.write("✅ Strong emotional alignment")
-
-                    if st.button(f"✨ Analyze {p['name']}", key=f"analyze_match_{idx}"):
-                        with st.spinner("Reading the vibes..."):
-                            viral_text = ai_scorecard(
-                                api_key,
-                                st.session_state.user_profile["name"],
-                                p["name"],
-                                score,
-                                "Balanced"
-                            )
-                            st.markdown(
-                                f"<div class='viral-card'>{viral_text.replace(chr(10), '<br>')}</div>",
-                                unsafe_allow_html=True
-                            )
-
-                st.markdown("</div>", unsafe_allow_html=True)
+# Add placeholder pages for Swipeee and Yugma to prevent errors when navigating to them
+elif st.session_state.page == "Swipeee":
+    st.title("Swipeee! ⚡")
+    st.write("This is the Swipeee page. Implementation coming soon!")
+    if st.button("← Back to Modes"):
+        st.session_state.page = "Modes"
+        st.rerun()
+elif st.session_state.page == "Yugma":
+    st.title("Yugma Mode 🔮")
+    st.write("This is the Yugma page. Implementation coming soon!")
+    if st.button("← Back to Modes"):
+        st.session_state.page = "Modes"
+        st.rerun()
 
